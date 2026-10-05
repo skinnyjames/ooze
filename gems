@@ -1,0 +1,2 @@
+#conf.gem "../../deps/mruby-vtparse"
+conf.gem "../../deps/mruby-utf8proc"
