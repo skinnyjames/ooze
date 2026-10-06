@@ -24,16 +24,23 @@ module Matchers
   end
 end
 
-module Ooze
+module Oozey
   module Harness
     include Theorem::Control::Harness
 
     load_tests do |options|
+      # load app code
+      Dir.glob("ooze/**/*.rb") do |file|
+        eval File.read(file)
+      end
+
+      # load test code
       Dir.glob("test/**/*.rb") do |file|
         next if file.include?("ooze.rb")
 
         eval File.read(file)
       end
+
 
       filtered_registry({})
     end
@@ -78,4 +85,4 @@ def get_blocks_by_type(block, type, results = [])
   results
 end
 
-Ooze::Hypothesis.run!
+Oozey::Hypothesis.run!

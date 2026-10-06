@@ -1,4 +1,4 @@
-class UTF8Test < Ooze::Test
+class UTF8Test < Oozey::Test
   test "Integer#charwidth return valid charwidth" do
     expect("a".ord.charwidth).to eql(1)
   end
@@ -24,7 +24,7 @@ class UTF8Test < Ooze::Test
     end
   end 
 
-  test "String#width Ambigious width" do
+  test "String#width ambigious width can be defined" do
     expect("±".width).to eql(2)
     expect("±".width(1)).to eql(1)
   end
