@@ -30,10 +30,6 @@ module Oozey
 
     load_tests do |options|
       # load app code
-      Dir.glob("ooze/**/*.rb") do |file|
-        eval File.read(file)
-      end
-
       # load test code
       Dir.glob("test/**/*.rb") do |file|
         next if file.include?("ooze.rb")
@@ -57,7 +53,6 @@ module Oozey
     include Matchers
   end
 end
-
 
 def get_block_by_type(block, type)
   return block if (block.node.ast.type == type) || (block.node.portal&.ast&.has_if_condition? && block.node.portal&.ast&.type == type)
@@ -85,4 +80,5 @@ def get_blocks_by_type(block, type, results = [])
   results
 end
 
+eval ruby_file("ooze/terminal.rb")
 Oozey::Hypothesis.run!
