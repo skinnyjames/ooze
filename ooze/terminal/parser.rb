@@ -8,7 +8,23 @@ module Ooze
       # Public: A Parser action
       #         yielded to the callback provided by 
       #         on_parse
-      Action = Struct.new(:type, :codepoint, :intermediates, :params, :content, :private_marker)
+      Action = Struct.new(:type, :codepoint, :intermediates, :params, :content, :private_marker) do
+        def chr
+          codepoint.chr
+        end
+
+        def private_marker_chr
+          private_marker&.chr("UTF-8")
+        end
+
+        def intermediate_first
+          intermediates[0]
+        end
+
+        def param_first
+          params[0]
+        end
+      end
 
       attr_reader :intermediates, :params, :state
 
@@ -23,132 +39,129 @@ module Ooze
         @on_parse = nil
       end
 
-      def on_parse(&block)
-        @on_parse = block
+      def reset
+        @state = :ground
+        @intermediates = []
+        @params = []
+        @printbuffer = ""
+        @buffer = ""
+        @ignore_flagged = false
+        @on_parse = nil
       end
 
-      # Public: Turns a command into an ANSI Sequence for
-      #         consumption by the pty
-      #
-      # command - Symbol or VTParser::Command
-      #
-      # Returns String
-      def send_command(command)
-        if command == VTParser::Command
-          return command.to_s
-        end
-
-        COMMANDS[command]
+      def on_parse(&block)
+        @on_parse = block
       end
 
       # Ignoring this range, because we don't support DEC Multinational, but everything above is printable unicode.
       C1_IGNORE_RANGE = (ASCII_MAX..ASCII_MAX | DEC_MN_CODE_TABLE[:apc])
 
       ANYWHERE = {
-        ASCII_CODE_TABLE[:can] => [:clear, :ground],
-        ASCII_CODE_TABLE[:sub] => [:clear, :ground],
-        ASCII_CODE_TABLE[:esc] => [:clear, :escape],
+        SEQR["can"] => [:clear, :ground],
+        SEQR["sub"] => [:clear, :ground],
+        SEQR["esc"] => [:clear, :escape],
       }
 
-      ON_GOTO = { osc: :osc_start, escape: :clear, csi: :clear, dcs_passthrough: :hook }
+      ON_ENTRY = { osc: :osc_start, escape: :clear, csi: :clear, dcs_passthrough: :hook }
       ON_EXIT = { osc: :osc_stop, dcs_passthrough: :unhook }
 
+      # Transition table for the state machine
+      # Hash of :state => { char_range => [:action, :new_state] }
       TRANSITIONS = {
         ground: {
-          ASCII_CODE_TABLE[:nul]..ASCII_CODE_TABLE[:us] => [:execute, :ground],
+          SEQR["nul .. us"] =>    [:execute, :ground],
           # Printable: not including delete (This terminal claims VT200 Compatible)
-          (ASCII_CODE_TABLE[:sp]...ASCII_CODE_TABLE[:del]) => [:print, :ground],
+          SEQR["sp .. ~"] =>      [:print, :ground],
         },
         escape: {
-          (ASCII_CODE_TABLE[:nul]..ASCII_CODE_TABLE[:us]) => [:execute, :escape],
-          (ASCII_CODE_TABLE[:sp]..ASCII_CODE_TABLE['/']) => [:collect, :escape_intermediate],
-          (ASCII_CODE_TABLE['0']..ASCII_CODE_TABLE['~']) => [:escape_dispatch, :ground],
-          ASCII_CODE_TABLE['X'] => [:goto, :sos],
-          ASCII_CODE_TABLE['^'] => [:goto, :sos],
-          ASCII_CODE_TABLE['_'] => [:goto, :sos],
-          ASCII_CODE_TABLE['P'] => [:goto, :dcs],
-          ASCII_CODE_TABLE[']'] => [:goto, :osc],
-          ASCII_CODE_TABLE['['] => [:goto, :csi],
-          ASCII_CODE_TABLE[:del] => [:ignore, :escape],
+          SEQR["nul .. us"] =>    [:execute, :escape],
+          SEQR["sp .. /"] =>      [:collect, :escape_intermediate],
+          SEQR["0 .. ~"] =>       [:escape_dispatch, :ground],
+          SEQR["X"] =>            [:goto, :sos],
+          SEQR["^"] =>            [:goto, :sos],
+          SEQR["_"] =>            [:goto, :sos],
+          SEQR["P"] =>            [:goto, :dcs],
+          SEQR["]"] =>            [:goto, :osc],
+          SEQR["["] =>            [:goto, :csi],
+          SEQR["del"] =>          [:ignore, :escape],
         },
         escape_intermediate: {
-          (ASCII_CODE_TABLE[:nul]..ASCII_CODE_TABLE[:us]) => [:execute, :escape_intermediate],
-          (ASCII_CODE_TABLE[:sp]..ASCII_CODE_TABLE['/']) => [:collect, :escape_intermediate],
-          (ASCII_CODE_TABLE['0']..ASCII_CODE_TABLE['~']) => [:escape_dispatch, :ground],
-          ASCII_CODE_TABLE[:del] => [:ignore, :escape_intermediate],
+          SEQR["nul .. us"] =>    [:execute, :escape_intermediate],
+          SEQR["sp .. /"] =>      [:collect, :escape_intermediate],
+          SEQR["0 .. ~"] =>       [:escape_dispatch, :ground],
+          SEQR["del"] =>          [:ignore, :escape_intermediate],
         },
         osc: {
-          ASCII_CODE_TABLE[:nul]..ASCII_CODE_TABLE[:us] => [:ignore, :osc],
-          ASCII_CODE_TABLE[:sp]..ASCII_CODE_TABLE[:del] => [:osc_put, :osc],
-          ASCII_CODE_TABLE[:bel] => [:goto, :ground], # for xterm/modern terminals
+          SEQR["nul .. us"] =>    [:ignore, :osc],
+          SEQR["sp .. del"] =>    [:osc_put, :osc],
+          SEQR["bel"] =>          [:goto, :ground],
         },
         csi: {
-          ASCII_CODE_TABLE[:nul]..ASCII_CODE_TABLE[:us] => [:execute, :csi],
-          ASCII_CODE_TABLE[:del] => [:ignore, :csi],
-          ASCII_CODE_TABLE[:sp]..ASCII_CODE_TABLE['/'] => [:collect, :csi_intermediate],
-          ASCII_CODE_TABLE['0']..ASCII_CODE_TABLE[';'] => [:param, :csi_param],
-          ASCII_CODE_TABLE['<']..ASCII_CODE_TABLE['?'] => [:collect, :csi_param],
-          ASCII_CODE_TABLE[':'] => [:goto, :csi_ignore],
-          ASCII_CODE_TABLE['@']...ASCII_CODE_TABLE[:del] => [:csi_dispatch, :ground],
+          SEQR["nul .. us"] =>    [:execute, :csi],
+          SEQR["del"] =>          [:ignore, :csi],
+          SEQR["sp .. /"] =>      [:collect, :csi_intermediate],
+          SEQR["0 .. ;"] =>       [:param, :csi_param],
+          SEQR["< .. ?"] =>       [:collect, :csi_param],
+          SEQR[":"] =>            [:goto, :csi_ignore],
+          SEQR["@ .. ~"] =>       [:csi_dispatch, :ground],
         },
         csi_ignore: {
-          ASCII_CODE_TABLE[:nul]..ASCII_CODE_TABLE[:us] => [:execute, :csi_ignore],
-          ASCII_CODE_TABLE[:sp]..ASCII_CODE_TABLE['?'] => [:ignore, :csi_ignore],
-          ASCII_CODE_TABLE[:del] => [:ignore, :csi_ignore],
-          ASCII_CODE_TABLE['@']...ASCII_CODE_TABLE[:del] => [:goto, :ground]
+          SEQR["nul .. us"] =>    [:execute, :csi_ignore],
+          SEQR["sp .. ?"] =>      [:ignore, :csi_ignore],
+          SEQR["del"] =>          [:ignore, :csi_ignore],
+          SEQR["@ .. ~"] =>       [:goto, :ground],
         },
         csi_param: {
-          ASCII_CODE_TABLE[:nul]..ASCII_CODE_TABLE[:us] => [:execute, :csi_param],
-          # 30 to 3B
-          ASCII_CODE_TABLE['0']...ASCII_CODE_TABLE[':'] => [:param, :csi_param],
-          ASCII_CODE_TABLE[':']..ASCII_CODE_TABLE['?'] => [:goto, :csi_ignore],
-          ASCII_CODE_TABLE[';'] => [:param, :csi_param],
-          ASCII_CODE_TABLE[:del] => [:ignore, :csi_param],
-          ASCII_CODE_TABLE[:sp]..ASCII_CODE_TABLE['/'] => [:collect, :csi_intermediate],
-          ASCII_CODE_TABLE['@']...ASCII_CODE_TABLE[:del] => [:csi_dispatch, :ground]
+          SEQR["nul .. us"] =>    [:execute, :csi_param],
+          SEQR["0 .. 9"] =>       [:param, :csi_param],
+          SEQR[": .. ?"] =>       [:goto, :csi_ignore],
+          SEQR[";"] =>            [:param, :csi_param],
+          SEQR["del"] =>          [:ignore, :csi_param],
+          SEQR["sp .. /"] =>      [:collect, :csi_intermediate],
+          SEQR["@ .. ~"] =>       [:csi_dispatch, :ground],
         },
         csi_intermediate: {
-          ASCII_CODE_TABLE[:nul]..ASCII_CODE_TABLE[:us] => [:execute, :csi_intermediate],
-          ASCII_CODE_TABLE[:sp]..ASCII_CODE_TABLE['/'] => [:collect, :csi_intermediate],
-          ASCII_CODE_TABLE['0']..ASCII_CODE_TABLE['?'] => [:goto, :csi_ignore],
-          ASCII_CODE_TABLE['@']...ASCII_CODE_TABLE[:del] => [:csi_dispatch, :ground],
-          ASCII_CODE_TABLE[:del] => [:ignore, :csi_intermediate],
+          SEQR["nul .. us"] =>    [:execute, :csi_intermediate],
+          SEQR["sp .. /"] =>      [:collect, :csi_intermediate],
+          SEQR["0 .. ?"] =>       [:goto, :csi_ignore],
+          SEQR["@ .. ~"] =>       [:csi_dispatch, :ground],
+          SEQR["del"] =>          [:ignore, :csi_intermediate],
         },
         dcs: {
-          (ASCII_CODE_TABLE[:nul]..ASCII_CODE_TABLE[:us]) => [:ignore, :dcs],
-          ASCII_CODE_TABLE[:sp]..ASCII_CODE_TABLE['/'] => [:collect, :dcs_intermediate],
-          ASCII_CODE_TABLE['0']..ASCII_CODE_TABLE[';'] => [:param, :dcs_param],
-          ASCII_CODE_TABLE['<']..ASCII_CODE_TABLE['?'] => [:collect, :dcs_param],
-          ASCII_CODE_TABLE['@']...ASCII_CODE_TABLE[:del] => [:goto, :dcs_passthrough],
-          ASCII_CODE_TABLE[':'] => [:goto, :dcs_ignore],
-          ASCII_CODE_TABLE[:del] => [:ignore, :dcs]
+          SEQR["nul .. us"] =>    [:ignore, :dcs],
+          SEQR["sp .. /"] =>      [:collect, :dcs_intermediate],
+          SEQR["0 .. ;"] =>       [:param, :dcs_param],
+          SEQR["< .. ?"] =>       [:collect, :dcs_param],
+          SEQR["@ .. ~"] =>       [:goto, :dcs_passthrough],
+          SEQR[":"] =>            [:goto, :dcs_ignore],
+          SEQR["del"] =>          [:ignore, :dcs],
         },
         dcs_ignore: {
-          ASCII_CODE_TABLE[:nul]..ASCII_CODE_TABLE[:del] => [:ignore, :dcs_ignore],      
+          SEQR["nul .. del"] =>   [:ignore, :dcs_ignore],
         },
         dcs_param: {
-          ASCII_CODE_TABLE[:nul]..ASCII_CODE_TABLE[:us] => [:ignore, :dcs_param],
-          ASCII_CODE_TABLE['0']..ASCII_CODE_TABLE[';'] => [:param, :dcs_param],
-          ASCII_CODE_TABLE[':'] => [:goto, :dcs_ignore],
-          ASCII_CODE_TABLE['<']..ASCII_CODE_TABLE['?'] => [:goto, :dcs_ignore],
-          ASCII_CODE_TABLE['@']..ASCII_CODE_TABLE['~'] => [:goto, :dcs_passthrough],
-          ASCII_CODE_TABLE[:sp]..ASCII_CODE_TABLE['/'] => [:collect, :dcs_intermediate],
-          ASCII_CODE_TABLE[:del] => [:ignore, :dcs_param]
+          SEQR["nul .. us"] =>    [:ignore, :dcs_param],
+          SEQR["0 .. ;"] =>       [:param, :dcs_param],
+          SEQR[":"] =>            [:goto, :dcs_ignore],
+          SEQR["< .. ?"] =>       [:goto, :dcs_ignore],
+          SEQR["@ .. ~"] =>       [:goto, :dcs_passthrough],
+          SEQR["sp .. /"] =>      [:collect, :dcs_intermediate],
+          SEQR["del"] =>          [:ignore, :dcs_param],
         },
         dcs_intermediate: {
-          ASCII_CODE_TABLE[:nul]..ASCII_CODE_TABLE[:us] => [:ignore, :dcs_intermediate],
-          ASCII_CODE_TABLE[:sp]..ASCII_CODE_TABLE['/'] => [:collect, :dcs_intermediate],
-          ASCII_CODE_TABLE[:del] => [:ignore, :dcs_intermediate],
-          ASCII_CODE_TABLE['0']..ASCII_CODE_TABLE['?'] => [:goto, :dcs_ignore],
-          ASCII_CODE_TABLE['@']..ASCII_CODE_TABLE['~'] => [:goto, :dcs_passthrough],
+          SEQR["nul .. us"] =>    [:ignore, :dcs_intermediate],
+          SEQR["sp .. /"] =>      [:collect, :dcs_intermediate],
+          SEQR["del"] =>          [:ignore, :dcs_intermediate],
+          SEQR["0 .. ?"] =>       [:goto, :dcs_ignore],
+          SEQR["@ .. ~"] =>       [:goto, :dcs_passthrough],
         },
         dcs_passthrough: {
-          ASCII_CODE_TABLE[:nul]..ASCII_CODE_TABLE[:us] => [:put, :dcs_passthrough],
-          ASCII_CODE_TABLE[:sp]..ASCII_CODE_TABLE['~'] => [:put, :dcs_passthrough],
-          ASCII_CODE_TABLE[:del] => [:ignore, :dcs_passthrough]
+          SEQR["nul .. us"] =>    [:put, :dcs_passthrough],
+          SEQR["sp .. ~"] =>      [:put, :dcs_passthrough],
+          SEQR["del"] =>          [:ignore, :dcs_passthrough],
         },
         sos: {
-          ASCII_CODE_TABLE[:nul]..ASCII_CODE_TABLE[:del] => [:ignore, :sos]
+          SEQR["nul .. del"] =>   [:ignore, :sos]
         }
       }
 
@@ -178,7 +191,6 @@ module Ooze
       # Returns nothing
       def parse(str)
         str.codepoints_each do |codepoint|
-          # Outside ASCII range
           if codepoint >= 160
             case state
             when :ground
@@ -198,7 +210,7 @@ module Ooze
           if state != new_state
             handle_action(ON_EXIT[state], codepoint) if ON_EXIT[state]
             handle_action(action, codepoint)
-            handle_action(ON_GOTO[new_state], codepoint) if ON_GOTO[new_state]
+            handle_action(ON_ENTRY[new_state], codepoint) if ON_ENTRY[new_state]
           else
             handle_action(action, codepoint)
           end

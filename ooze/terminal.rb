@@ -61,9 +61,79 @@ module Ooze
       'ø' => 0x78, 'ù' => 0x79, 'ú' => 0x7A, 'û' => 0x7B, 'ü' => 0x7C, 
       'ÿ' => 0x7D
     }.freeze
+
+    class SEQ
+      def self.[](str)
+        tokens = str.split(" ")
+        values = []
+        while token = tokens.shift
+          if token.size > 1
+            if (token.start_with?("\"")  || token.start_with?("'"))
+              quot = token[0]
+              stack = [token]
+
+              while !stack[-1].end_with?(quot)
+                newtoken = tokens.shift
+                raise "Unterminated #{quot} in SEQ" if newtoken.nil?
+
+                stack << newtoken
+              end
+
+              aggregate = stack.join(" ")
+
+              values.concat aggregate[1...-1].split("").map { |c| c.ord }
+            elsif token =~ /^[A-Z][A-Z0-9]+$/
+              values.concat Terminal.const_get(token)
+            elsif token =~ /^[0-9]+$/
+              values.concat token.split("").map { |num| ASCII_CODE_TABLE[num] }
+            else
+              value = ASCII_CODE_TABLE[token.downcase.to_sym]
+              raise "SEQ: Can't find #{token.to_sym} in ASCII_CODE_TABLE" if value.nil?
+              values << value
+            end
+          else
+            values << ASCII_CODE_TABLE[token]
+          end
+        end
+
+        values
+      end
+    end
+
+    class SEQR
+      def self.[](str)
+        tokens = str.split(" ")
+        case tokens.size
+        when 1
+          raise "No compound args" if SEQ[tokens[0]].size > 1
+
+          return SEQ[tokens[0]][0].freeze
+        when 3
+          if tokens[1] == ".."
+            raise "No compound args" if SEQ[tokens[0]].size > 1 || SEQ[tokens[2]].size > 1
+
+            return (SEQ[tokens[0]][0]..SEQ[tokens[2]][0]).freeze
+          end
+        end
+
+        raise "Should be a single value or range"
+      end
+    end
+
+    # Control Sequence Introducer
+    # https://en.wikipedia.org/wiki/ANSI_escape_code#Control_Sequence_Introducer_commands
+    # Using ASCII represenation instead of C1 set.
+    CSI = SEQ["esc ["].freeze
+    OSC = SEQ["esc ]"].freeze
+    
+    # Single Shift G3
+    # https://www.vt100.net/docs/vt220-rm/chapter4.html#F4-3
+    # Moves the next graphic char from G3 (Graphics 3) into GL (ASCII charset) 
+    SS3 = SEQ["esc O"].freeze
   end
 end
 
 require_relative './terminal/session'
 require_relative './terminal/input'
 require_relative './terminal/parser'
+require_relative "./terminal/screen"

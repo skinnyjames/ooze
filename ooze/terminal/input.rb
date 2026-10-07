@@ -16,71 +16,63 @@ module Ooze
       def initialize(session)
         @session = session
       end
-
-      # Control Sequence Introducer
-      # https://en.wikipedia.org/wiki/ANSI_escape_code#Control_Sequence_Introducer_commands
-      # Using ASCII represenation instead of C1 set.
-      CSI = [ASCII_CODE_TABLE[:esc], ASCII_CODE_TABLE['[']].freeze
       
-      # Single Shift G3
-      # https://www.vt100.net/docs/vt220-rm/chapter4.html#F4-3
-      # Moves the next graphic char from G3 (Graphics 3) into GL (ASCII charset) 
-      SS3 = [ASCII_CODE_TABLE[:esc], ASCII_CODE_TABLE['O']].freeze
-      
-      FIND =  (CSI + [ASCII_CODE_TABLE['1'], ASCII_CODE_TABLE['~']]).freeze
-      INSERT_HERE = (CSI + [ASCII_CODE_TABLE['2'], ASCII_CODE_TABLE['~']]).freeze
-      DELETE = (CSI + [ASCII_CODE_TABLE['3'], ASCII_CODE_TABLE['~']]).freeze
+      FIND =            SEQ["CSI 1 ~"].freeze
+      INSERT_HERE =     SEQ["CSI 2 ~"].freeze
+      DELETE =          SEQ["CSI 3 ~"].freeze
 
       # Editing
-      SELECT = (CSI + [ASCII_CODE_TABLE['4'], ASCII_CODE_TABLE['~']]).freeze
-      PREV_SCREEN = (CSI + [ASCII_CODE_TABLE['5'], ASCII_CODE_TABLE['~']]).freeze
-      NEXT_SCREEN = (CSI + [ASCII_CODE_TABLE['6'], ASCII_CODE_TABLE['~']]).freeze
+      SELECT =          SEQ["CSI 4 ~"].freeze
+      PREV_SCREEN =     SEQ["CSI 5 ~"].freeze
+      NEXT_SCREEN =     SEQ["CSI 6 ~"].freeze
 
       # Cursor (Normal)
-      UP = (CSI + [ASCII_CODE_TABLE['A']]).freeze
-      DOWN = (CSI + [ASCII_CODE_TABLE['B']]).freeze
-      RIGHT = (CSI + [ASCII_CODE_TABLE['C']]).freeze
-      LEFT = (CSI + [ASCII_CODE_TABLE['D']]).freeze
-    
+      UP =              SEQ["CSI A"].freeze
+      DOWN =            SEQ["CSI B"].freeze
+      RIGHT =           SEQ["CSI C"].freeze
+      LEFT =            SEQ["CSI D"].freeze
+
       # Cursor (Application)
-      APP_UP = (SS3 + [ASCII_CODE_TABLE['A']]).freeze
-      APP_DOWN = (SS3 + [ASCII_CODE_TABLE['B']]).freeze
-      APP_RIGHT = (SS3 + [ASCII_CODE_TABLE['C']]).freeze
-      APP_LEFT = (SS3 + [ASCII_CODE_TABLE['D']]).freeze
+      APP_UP =          SEQ["SS3 A"].freeze
+      APP_DOWN =        SEQ["SS3 B"].freeze
+      APP_RIGHT =       SEQ["SS3 C"].freeze
+      APP_LEFT =        SEQ["SS3 D"].freeze
 
       # Function keys
-      F6 = (CSI + [ASCII_CODE_TABLE['1'], ASCII_CODE_TABLE['7'], ASCII_CODE_TABLE['~']]).freeze
-      F7 = (CSI + [ASCII_CODE_TABLE['1'], ASCII_CODE_TABLE['8'], ASCII_CODE_TABLE['~']]).freeze
-      F8 = (CSI + [ASCII_CODE_TABLE['1'], ASCII_CODE_TABLE['9'], ASCII_CODE_TABLE['~']]).freeze
-      F9 = (CSI + [ASCII_CODE_TABLE['2'], ASCII_CODE_TABLE['0'], ASCII_CODE_TABLE['~']]).freeze
-      F10 = (CSI + [ASCII_CODE_TABLE['2'], ASCII_CODE_TABLE['1'], ASCII_CODE_TABLE['~']]).freeze
-      F11 = (CSI + [ASCII_CODE_TABLE['2'], ASCII_CODE_TABLE['3'], ASCII_CODE_TABLE['~']]).freeze
-      F11_ALT = (CSI + [ASCII_CODE_TABLE['2'], ASCII_CODE_TABLE['3'], ASCII_CODE_TABLE[:esc]]).freeze
-      F12 = (CSI + [ASCII_CODE_TABLE['2'], ASCII_CODE_TABLE['4'], ASCII_CODE_TABLE['~']]).freeze
-      F12_ALT = (CSI + [ASCII_CODE_TABLE['2'], ASCII_CODE_TABLE['3'], ASCII_CODE_TABLE[:bs]]).freeze
-      F13 = (CSI + [ASCII_CODE_TABLE['2'], ASCII_CODE_TABLE['5'], ASCII_CODE_TABLE['~']]).freeze
-      F13_ALT = (CSI + [ASCII_CODE_TABLE['2'], ASCII_CODE_TABLE['3'], ASCII_CODE_TABLE[:lf]]).freeze
-      F14 = (CSI + [ASCII_CODE_TABLE['2'], ASCII_CODE_TABLE['6'], ASCII_CODE_TABLE['~']]).freeze
-      F15 = (CSI + [ASCII_CODE_TABLE['2'], ASCII_CODE_TABLE['8'], ASCII_CODE_TABLE['~']]).freeze
-      F16 = (CSI + [ASCII_CODE_TABLE['2'], ASCII_CODE_TABLE['9'], ASCII_CODE_TABLE['~']]).freeze
-      F17 = (CSI + [ASCII_CODE_TABLE['3'], ASCII_CODE_TABLE['1'], ASCII_CODE_TABLE['~']]).freeze
-      F18 = (CSI + [ASCII_CODE_TABLE['3'], ASCII_CODE_TABLE['2'], ASCII_CODE_TABLE['~']]).freeze
-      F19 = (CSI + [ASCII_CODE_TABLE['3'], ASCII_CODE_TABLE['3'], ASCII_CODE_TABLE['~']]).freeze
-      F20 = (CSI + [ASCII_CODE_TABLE['3'], ASCII_CODE_TABLE['4'], ASCII_CODE_TABLE['~']]).freeze
+      F6 =              SEQ["CSI 1 7 ~"].freeze
+      F7 =              SEQ["CSI 1 8 ~"].freeze
+      F8 =              SEQ["CSI 1 9 ~"].freeze
+      F9 =              SEQ["CSI 2 0 ~"].freeze
+      F10 =             SEQ["CSI 2 1 ~"].freeze
+      F11 =             SEQ["CSI 2 3 ~"].freeze
+      F12 =             SEQ["CSI 2 4 ~"].freeze
+      F13 =             SEQ["CSI 2 5 ~"].freeze
+
+      F14 =             SEQ["CSI 2 6 ~"].freeze
+      F15 =             SEQ["CSI 2 8 ~"].freeze
+      F16 =             SEQ["CSI 2 9 ~"].freeze
+      F17 =             SEQ["CSI 3 1 ~"].freeze
+      F18 =             SEQ["CSI 3 2 ~"].freeze
+      F19 =             SEQ["CSI 3 3 ~"].freeze
+      F20 =             SEQ["CSI 3 4 ~"].freeze
+
+      # F11_ALT = (CSI + [ASCII_CODE_TABLE['2'], ASCII_CODE_TABLE['3'], ASCII_CODE_TABLE[:esc]]).freeze
+      # F12_ALT = (CSI + [ASCII_CODE_TABLE['2'], ASCII_CODE_TABLE['3'], ASCII_CODE_TABLE[:bs]]).freeze
+      # F13_ALT = (CSI + [ASCII_CODE_TABLE['2'], ASCII_CODE_TABLE['3'], ASCII_CODE_TABLE[:lf]]).freeze
 
       # Aux Keypad (Numeric Mode)
       # https://www.vt100.net/docs/vt220-rm/chapter3.html#S3.2.3
       KEYPAD_NUMS = {}
       (0..9).each do |num|
-        KEYPAD_NUMS[num.to_s] = [ASCII_CODE_TABLE[num.to_s]].freeze
+        KEYPAD_NUMS[num.to_s] = SEQ[num.to_s].freeze
       end
-      KEYPAD_NUMS['-'] = [ASCII_CODE_TABLE['-']].freeze
-      KEYPAD_NUMS[','] = [ASCII_CODE_TABLE[',']].freeze
-      KEYPAD_NUMS['.'] = [ASCII_CODE_TABLE['.']].freeze
-      KEYPAD_NUMS[:pf1] = (SS3 + [ASCII_CODE_TABLE['P']]).freeze
-      KEYPAD_NUMS[:pf2] = (SS3 + [ASCII_CODE_TABLE['Q']]).freeze
-      KEYPAD_NUMS[:pf3] = (SS3 + [ASCII_CODE_TABLE['R']]).freeze
-      KEYPAD_NUMS[:pf4] = (SS3 + [ASCII_CODE_TABLE['S']]).freeze
+      KEYPAD_NUMS['-'] =  SEQ["-"].freeze
+      KEYPAD_NUMS[','] =  SEQ[","].freeze
+      KEYPAD_NUMS['.'] =  SEQ["."].freeze
+      KEYPAD_NUMS[:pf1] = SEQ["SS3 P"].freeze
+      KEYPAD_NUMS[:pf2] = SEQ["SS3 Q"].freeze
+      KEYPAD_NUMS[:pf3] = SEQ["SS3 R"].freeze
+      KEYPAD_NUMS[:pf4] = SEQ["SS3 S"].freeze
       KEYPAD_NUMS[:enter] = nil # Explicity marking that enter depends on the linefeed mode.
       KEYPAD_NUMS.freeze
 
@@ -93,19 +85,19 @@ module Ooze
         '-' => 'm', ',' => 'l', '.' => 'n', :enter => 'M', :pf1 => 'P',
         :pf2 => 'Q', :pf3 => 'R', :pf4 => 'S'
       }.each do |k, v|
-        KEYPAD_APPS[k] = (SS3 + [ASCII_CODE_TABLE[v]]).freeze
+        KEYPAD_APPS[k] = SEQ["SS3 #{v}"].freeze
       end
 
-      SPACE = [ASCII_CODE_TABLE[:sp]].freeze
-      BACKSPACE = [ASCII_CODE_TABLE[:del]].freeze
-      TAB = [ASCII_CODE_TABLE[:ht]].freeze
+      SPACE =         SEQ["sp"].freeze
+      BACKSPACE =     SEQ["del"].freeze
+      TAB =           SEQ["ht"].freeze
 
-      RETURN_LF_ON = [ASCII_CODE_TABLE[:cr], ASCII_CODE_TABLE[:lf]].freeze
-      RETURN_LF_OFF = [ASCII_CODE_TABLE[:cr]].freeze
+      RETURN_LF_ON =  SEQ["cr lf"].freeze
+      RETURN_LF_OFF = SEQ["cr"].freeze
 
       # TODO: Control codes
       # https://www.vt100.net/docs/vt220-rm/chapter3.html#S3.2.5
-
+      
 
       # Functions
       def csi = CSI
