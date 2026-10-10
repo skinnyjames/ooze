@@ -57,6 +57,7 @@ module Ooze
         }
       end
 
+      attr_accessor :ambiguous_width
       attr_reader :pty, :parser, :input
 
       def initialize(pty)
@@ -67,12 +68,19 @@ module Ooze
         @altscreen = Screen.new(self, pty.rows, pty.cols)
         @altscreen.skip_evict = true
 
+        @ambiguous_width = 1
+        @charset = :ascii
         @cursor_style = :block_blink
+
         @on_bell = nil
         @on_window_title = nil
         @on_clipboard = nil
 
         setup_on_parse
+      end
+
+      def width(codepoint)
+        codepoint.charwidth(ambiguous_width)
       end
 
       def on_bell(&block)
@@ -134,7 +142,7 @@ module Ooze
       def on_print(action)
         case parser.state
         when :ground
-          screen.print(action.codepoint)
+          screen.print(SEQ.with_charset(action.codepoint, @charset))
         end
       end
 
@@ -150,7 +158,11 @@ module Ooze
           when '5' # 4.10.2 Single-Width Line (DECSWL)
           when '6' # 4.10.3 Double-Width Line (DECDWL)
           end
-        when '(', ')' # 4.4.1 Designating Hard Character Sets
+        when '('  # 4.4.1 Designating Hard Character Sets
+          case action.chr
+          when '0' then @charset = :dec_graphics # activate DEC special graphics
+          when 'B' then @charset = :ascii # switch to ascii
+          end
         when nil
           case action.chr
           # reset
@@ -313,6 +325,7 @@ module Ooze
         @screen = Screen.new(self, pty.rows, pty.cols)
         @screen.scrollback = scrollback
         @parser.reset
+        @charset = :ascii
       end
 
       def soft_reset(action)
@@ -324,6 +337,7 @@ module Ooze
         screen.reset_style
         screen.cursor.row = 0
         screen.cursor.col = 0
+        @charset = :ascii
       end
 
       def report_attributes(action)

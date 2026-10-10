@@ -30,8 +30,7 @@ module Ooze
 
       # Public: Replaces a char at (col). 
       #         Replace mode adds characters by replacing the character at the cursor position.
-      def replace(col, codepoint, attr)
-        charw = codepoint.charwidth
+      def replace(col, codepoint, attr, charw: codepoint.charwidth(1))
         blank(col, attr)
 
         # if a wide char, fill in more cols
@@ -65,9 +64,7 @@ module Ooze
 
       # Public: Insert mode displays the new character and moves previously displayed characters to the right. 
       #
-      def insert(col, codepoint, attr)
-        charw = codepoint.charwidth
-
+      def insert(col, codepoint, attr, charw: codepoint.charwidth(1))
         # handle an insert in the middle of a wide char
         if entry = col(col)
           blank(col, attr) if entry[:offset] > 0
@@ -205,7 +202,7 @@ module Ooze
 
       def setup_tabstops
         (0...cols).each do |i|
-          if i & 8 == 0
+          if i % 8 == 0
             @tabstops[i] = true
           end
         end
@@ -484,7 +481,8 @@ module Ooze
         t = top
         b = bottom
         t = 1 if top.nil? || top.zero?
-        b = [b, rows].min if bottom.nil? || bottom.zero?
+        b = rows if bottom.nil? || bottom.zero?
+        b = [b, rows].min
 
         t -= 1
         b -= 1
@@ -547,7 +545,7 @@ module Ooze
       #       The parser can emit ZWJ or other (control) chars.
       #       ref: deps/mruby-utf8proc/src/utf8proc.h#644
       def print(codepoint)
-        width = codepoint.charwidth
+        width = session.width(codepoint)
 
         # wrap pending and autowrap is on, move the cursor down
         if session.modes[:decawm] && cursor.col + width > cols
@@ -559,10 +557,10 @@ module Ooze
         line = lines[cursor.row]
 
         if session.modes[:irm]
-          line.insert(cursor.col, codepoint, current_style_id)
+          line.insert(cursor.col, codepoint, current_style_id, charw: width)
         else
           col = [cursor.col, cols - width].min
-          line.replace(col, codepoint, current_style_id)
+          line.replace(col, codepoint, current_style_id, charw: width)
         end
 
         advance(width)

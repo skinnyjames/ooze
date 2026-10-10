@@ -204,6 +204,16 @@ class TerminalScreenTest < Oozey::Test
     expect(session.screen.scrollback[1][:style].underline).to be(false)
   end
 
+  test "SEQ translates DEC special graphics" do
+    expect(Ooze::Terminal::SEQ["l q q k", charset: :dec_graphics]).to eql("┌──┐".codepoints)
+    expect(Ooze::Terminal::SEQ["esc [ A", charset: :dec_graphics]).to eql(Ooze::Terminal::SEQ["esc [ A"])
+  end
+
+  test "Session prints DEC special graphics" do
+    session = parse("esc ( 0 l q q k esc ( B q", rows: 2, cols: 8)
+    expect(session.screen.lines[0].to_s).to eql("┌──┐q")
+  end
+
   test "SEQ" do
     @session.parser.parse(Ooze::Terminal::SEQ["CSI 4 m 'hell中o' CSI 24 m 'foobarbazwhat okay' CSI 5 m 'hellomynameissean'"].pack("U*").freeze)
     puts render(@session)

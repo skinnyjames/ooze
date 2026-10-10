@@ -1,8 +1,9 @@
 module Ooze
   module Terminal
     # Based on the VT220 Programmers reference manual
-    # https://www.vt100.net/docs/vt220-rm/
+    # https://vt100.net/docs/vt220-rm/chapter2.html
 
+    # 2.3.1 7-Bit ASCII Code Table
     # ASCII Code table (occupies the C0 range starting on the 1st bit to 7th)
     ASCII_CODE_TABLE = {
       nul: 0x00, soh: 0x01, stx: 0x02, etx: 0x03, eot: 0x04, enq: 0x05,
@@ -34,7 +35,7 @@ module Ooze
 
     ASCII_MAX = 0x80.freeze
 
-    # DEC Multinational charset  (occupies the C1 - GR range offset by the 8th bit)
+    # 2.4.1 DEC Multinational Character Set (occupies the C1 - GR range offset by the 8th bit)
     # Actual values are (0x80 | value)
     # LEGACY (Pre Unicode - For reference)
     DEC_MN_CODE_TABLE = {
@@ -62,8 +63,20 @@ module Ooze
       'ÿ' => 0x7D
     }.freeze
 
+    # 2.4.2 DEC Special Graphics Character Set
+    # https://en.wikipedia.org/wiki/DEC_Special_Graphics
+    DEC_SPECIAL_GRAPHICS_TABLE = {  
+      # Start special drawing chars
+      0x5F => ' ', 0x60 => '◆', 
+      0x61 => '▒', 0x62 => '␉', 0x63 => '␌', 0x64 => '␍', 0x65 => '␊', 0x66 => '°', 
+      0x67 => '±', 0x68 => '␤', 0x69 => '␋', 0x6A => '┘', 0x6B => '┐', 0x6C => '┌', 
+      0x6D => '└', 0x6E => '┼', 0x6F => '⎺', 0x70 => '⎻', 0x71 => '─', 0x72 => '⎼', 
+      0x73 => '⎽', 0x74 => '├', 0x75 => '┤', 0x76 => '┴', 0x77 => '┬', 0x78 => '│', 
+      0x79 => '≤', 0x7A => '≥', 0x7B => 'π', 0x7C => '≠', 0x7D => '£', 0x7E => '·', 
+    }.freeze
+
     class SEQ
-      def self.[](str)
+      def self.[](str, charset: :ascii)
         tokens = str.split(" ")
         values = []
         while token = tokens.shift
@@ -85,18 +98,24 @@ module Ooze
             elsif token =~ /^[A-Z][A-Z0-9]+$/
               values.concat Terminal.const_get(token)
             elsif token =~ /^[0-9]+$/
-              values.concat token.split("").map { |num| ASCII_CODE_TABLE[num] }
+              values.concat token.split("").map {|num| ASCII_CODE_TABLE[num] }
             else
               value = ASCII_CODE_TABLE[token.downcase.to_sym]
-              raise "SEQ: Can't find #{token.to_sym} in ASCII_CODE_TABLE" if value.nil?
+              raise "SEQ: Can't find #{token.to_sym} in ASCII_CODE_TABLE table" if value.nil?
               values << value
             end
           else
-            values << ASCII_CODE_TABLE[token]
+            values << with_charset(ASCII_CODE_TABLE[token], charset)
           end
         end
 
         values
+      end
+
+      def self.with_charset(codepoint, charset)
+        return codepoint unless charset == :dec_graphics
+
+        DEC_SPECIAL_GRAPHICS_TABLE[codepoint]&.ord || codepoint
       end
     end
 
