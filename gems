@@ -1,4 +1,4 @@
-#conf.gem "../../deps/mruby-vtparse"
+conf.gem "../../deps/mruby-pty"
 conf.gem "../../deps/mruby-utf8proc"
 conf.gem core: "mruby-string-ext"
 conf.gem core: "mruby-encoding"

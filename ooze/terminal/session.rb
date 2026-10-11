@@ -60,12 +60,16 @@ module Ooze
       attr_accessor :ambiguous_width
       attr_reader :pty, :parser, :input, :charset
 
+      PTY_BUFFER_SIZE = 4096
+
       def initialize(pty)
         @pty = pty
+        rows, cols = pty.size
+  
         @parser = Parser.new(self)
         @input = Input.new(self)
-        @screen = Screen.new(self, pty.rows, pty.cols)
-        @altscreen = Screen.new(self, pty.rows, pty.cols)
+        @screen = Screen.new(self, rows, cols)
+        @altscreen = Screen.new(self, rows, cols)
         @altscreen.skip_evict = true
 
         @ambiguous_width = 1
@@ -77,6 +81,16 @@ module Ooze
         @on_clipboard = nil
 
         setup_on_parse
+      end
+
+      def write(content)
+        pty.io.write(content)
+      end
+
+      def read(size = PTY_BUFFER_SIZE)
+        content = pty.io.sysread(size)
+        parser.parse(content.freeze)
+      rescue Errno::EAGAIN, Errno::EWOULDBLOCK, Errno::EIO, EOFError
       end
 
       def width(codepoint)
@@ -322,7 +336,8 @@ module Ooze
       def reset_hard(action)
         @modes = modes_initial
         scrollback = @screen.scrollback.dup
-        @screen = Screen.new(self, pty.rows, pty.cols)
+        rows, cols = pty.size
+        @screen = Screen.new(self, rows, cols)
         @screen.scrollback = scrollback
         @parser.reset
         @charset = :ascii
