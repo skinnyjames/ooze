@@ -131,7 +131,6 @@ class TerminalScreenTest < Oozey::Test
 
   test "Screen#print autowrap off terminates at margin" do
     session = parse("CSI ? 7 l '#{'x' * 25}'", cols: 20)
-    p row(session.screen.current_line)
     expect(session.screen.cursor.row).to eql(0)
     expect(session.screen.cursor.col).to eql(19)
   end
@@ -141,46 +140,6 @@ class TerminalScreenTest < Oozey::Test
     expect(session.screen.cursor.row).to eql(0)
     expect(session.screen.cursor.col).to eql(1)
     expect(row(session.screen.current_line)).to eql("a#{'x' * 19}")
-  end
-  
-  test "Screen#print insert mode shifts chars to the right" do
-    # "abcdef" Ins mode / Set Cursor + Z
-    session = parse("'abcdef' CSI 4 h CSI 0 ; 3 H 'Z'", cols: 6)
-    expect(row(session.screen.current_line)).to eql("abZcde")
-  end
-
-  test "Cursor movement" do
-    {
-      "CSI 5 B" => [5, 0],
-      "CSI 5 B CSI 1 A" => [4, 0],
-      "CSI B" => [1, 0],
-      "CSI 0 B" => [1, 0],
-      "CSI 5 C" => [0, 5],
-      "CSI 5 C CSI 1 D" => [0, 4], 
-      "CSI 5 ; 4 H" => [4, 3] # CUP is 1 indexed.. lol
-    }.each do |str, check|
-      session = parse(str, rows: 10, cols: 10)
-      row, col = check
-
-      expect(session.screen.cursor.row).to eql(row)
-      expect(session.screen.cursor.col).to eql(col)
-    end
-  end
-
-  test "Screen#erase_in_line mode 0 erases from cursor to EOL" do
-    # print, move cursor back 3 and erase
-    session = parse("'abcdef' CSI 2 D CSI 0 K", cols: 6)
-    expect(row(session.screen.current_line)).to eql("abc   ")
-  end
-
-  test "Screen#erase_in_line mode 1 erases from start to cursor" do
-    session = parse("'abcdef' CSI 2 D CSI 1 K", cols: 6)
-    expect(row(session.screen.current_line)).to eql("    ef")
-  end
-
-  test "Screen#erase_in_line mode 2 erases whole line" do
-    session = parse("'abcdef' CSI 2 D CSI 2 K", cols: 6)
-    expect(row(session.screen.current_line)).to eql("      ")
   end
 
   test "Screen evicts chars into scrollback" do

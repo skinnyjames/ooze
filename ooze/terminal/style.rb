@@ -185,6 +185,7 @@ module Ooze
       def reset
         @foreground = nil
         @background = nil
+        @underline_color = nil
         @bold = false
         @faint = false
         @italic = false
@@ -388,6 +389,14 @@ module Ooze
           case attr
           when 10..19
             @font_index = attr - 10
+          when 58 # set underline color
+            case ps.shift
+            when 5 # foreground color 8-bit
+              @underline_color = ps.shift
+            when 2 # foreground color rgb
+              @underline_color = [ps.shift || 0, ps.shift || 0, ps.shift || 0]
+            end
+          when 59 # unset underline color
           when 38
             case ps.shift
             when 5 # foreground color 8-bit
@@ -418,7 +427,7 @@ module Ooze
           @foreground, @background, @bold, @faint, @italic, 
           @underline, @double_underline, @overline, @strikethrough,
           @proportional, @framed, @circled, @superscript, @subscript, 
-          @blink, @hide, @invert, @font_index
+          @blink, @hide, @invert, @font_index, @underline_color
         ]
       end
 

@@ -46,7 +46,6 @@ module Ooze
         @printbuffer = ""
         @buffer = ""
         @ignore_flagged = false
-        @on_parse = nil
       end
 
       def on_parse(&block)
@@ -57,13 +56,13 @@ module Ooze
       C1_IGNORE_RANGE = (ASCII_MAX..ASCII_MAX | DEC_MN_CODE_TABLE[:apc])
 
       ANYWHERE = {
-        SEQR["can"] => [:clear, :ground],
-        SEQR["sub"] => [:clear, :ground],
+        SEQR["can"] => [:execute, :ground],
+        SEQR["sub"] => [:execute, :ground],
         SEQR["esc"] => [:clear, :escape],
       }
 
-      ON_ENTRY = { osc: :osc_start, escape: :clear, csi: :clear, dcs_passthrough: :hook }
-      ON_EXIT = { osc: :osc_stop, dcs_passthrough: :unhook }
+      ON_ENTRY = { osc: :osc_start, csi: :clear, dcs_passthrough: :hook }
+      ON_EXIT = { osc: :osc_dispatch, dcs_passthrough: :unhook }
 
       # Transition table for the state machine
       # Hash of :state => { char_range => [:action, :new_state] }
@@ -99,9 +98,9 @@ module Ooze
         csi: {
           SEQR["nul .. us"] =>    [:execute, :csi],
           SEQR["del"] =>          [:ignore, :csi],
+          SEQR["< .. ?"] =>       [:private_marker, :csi_param],
           SEQR["sp .. /"] =>      [:collect, :csi_intermediate],
           SEQR["0 .. ;"] =>       [:param, :csi_param],
-          SEQR["< .. ?"] =>       [:collect, :csi_param],
           SEQR[":"] =>            [:goto, :csi_ignore],
           SEQR["@ .. ~"] =>       [:csi_dispatch, :ground],
         },
@@ -129,9 +128,9 @@ module Ooze
         },
         dcs: {
           SEQR["nul .. us"] =>    [:ignore, :dcs],
+          SEQR["< .. ?"] =>       [:private_marker, :dcs_param],
           SEQR["sp .. /"] =>      [:collect, :dcs_intermediate],
           SEQR["0 .. ;"] =>       [:param, :dcs_param],
-          SEQR["< .. ?"] =>       [:collect, :dcs_param],
           SEQR["@ .. ~"] =>       [:goto, :dcs_passthrough],
           SEQR[":"] =>            [:goto, :dcs_ignore],
           SEQR["del"] =>          [:ignore, :dcs],
@@ -223,8 +222,9 @@ module Ooze
 
       def handle_action(action, codepoint)
         case action
+        when :private_marker
+          @private_marker = codepoint
         when :collect
-          @private_marker ||= codepoint
           @intermediates << codepoint unless @ignore_flagged
 
           return
@@ -258,11 +258,22 @@ module Ooze
             return
           when :print
             @buffer = codepoint.chr("UTF-8")
-          when :osc_stop, :unhook
-            @buffer = ""
+          when :execute
+            if codepoint == SEQR["can"] || codepoint == SEQR["sub"]
+              @private_marker = nil
+              @buffer = ""
+              @intermediates = []
+              @params = []
+              @ignore_flagged = false
+            end
           end
 
           @on_parse&.call(Action.new(action, codepoint, @intermediates, @params, @buffer, @private_marker))
+
+          case action
+          when :osc_dispatch, :unhook
+            @buffer = ""
+          end
 
           return unless action == :csi_dispatch || action == :osc_dispatch || action == :escape_dispatch
 

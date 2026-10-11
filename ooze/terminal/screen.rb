@@ -166,7 +166,8 @@ module Ooze
       attr_accessor :current_style_id, :margin_top, :margin_bottom,
                     :current_line_width, :cursor, :scrollback, :skip_evict
 
-      attr_reader :session, :rows, :cols, :cursor, :styles, :stylemap, :lines, :current_style
+      attr_reader :session, :rows, :cols, :cursor, :styles, :stylemap, :lines, :current_style,
+                  :tabstops
 
       def initialize(session, rows, cols)
         @session = session

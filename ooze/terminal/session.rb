@@ -58,7 +58,7 @@ module Ooze
       end
 
       attr_accessor :ambiguous_width
-      attr_reader :pty, :parser, :input
+      attr_reader :pty, :parser, :input, :charset
 
       def initialize(pty)
         @pty = pty
@@ -201,6 +201,9 @@ module Ooze
         when 'D' then screen.cursor_backward(ensure_one(action.params[0]))
         # https://vt100.net/docs/vt510-rm/CHA.html
         when 'G' then screen.set_cursor(screen.cursor.row, ensure_one(action.params[0]) - 1)
+        # https://vt100.net/docs/vt510-rm/CUP.html
+        # CUP is 1 indexed, so we need to subtract for our screen cursor, which is 0 indexed.
+        when 'H', 'f' then screen.set_cursor(ensure_one(action.params[0]) - 1, ensure_one(action.params[1]) - 1)
         # https://vt100.net/docs/vt510-rm/VPA.html
         when 'd' then screen.set_cursor(ensure_one(action.params[0]) - 1, screen.cursor.col)
         when 'S' then screen.scroll_up(action.params[0] || 1)
@@ -213,9 +216,6 @@ module Ooze
           screen.cursor.col = 0
         when 'r' then screen.set_margins(action.params[0] || 0, action.params[1])
         when 'g' then screen.tabclear(action.params[0] == 3)
-        # https://vt100.net/docs/vt510-rm/CUP.html
-        # CUP is 1 indexed, so we need to subtract for our screen cursor, which is 0 indexed.
-        when 'H', 'f' then screen.set_cursor(ensure_one(action.params[0]) - 1, ensure_one(action.params[1]) - 1)
         when 'm' then screen.sgr(action.params)
         # Editing
         when 'L' then screen.line_insert(ensure_one(action.params[0]))

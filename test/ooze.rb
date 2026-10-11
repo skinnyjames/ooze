@@ -24,73 +24,8 @@ module Matchers
   end
 end
 
-class TestRender
-  attr_reader :session
 
-  def initialize(session)
-    @session = session
-  end
-
-  def render
-    rows = []
-
-    header = []
-    dheader = []
-    (0...session.screen.cols).each do |col|
-      header << col.to_s.center(3)
-      dheader << "---"
-    end
-
-    rows << "|#{header.join("|")}|"
-    rows << "|#{dheader.join("|")}|"
-
-    (0...session.screen.rows).each do |row|
-      line = session.screen.lines[row]
-      cp = nil
-      wc = nil
-      st = nil
-
-      row = []
-      srow = []
-      drow = []
-
-      (0...session.screen.cols).each do |col|
-        drow << "---"
-
-        if entry = line.col(col)
-          if entry[:offset] > 0
-            srow << " * "
-            next
-          end
-  
-          cp = entry[:char]
-          wc = entry[:width]
-          st = entry[:style_id]
-
-          if entry && wc == 1
-            row << " #{cp} "
-            srow << " #{st} "
-            next
-          elsif entry && wc > 1
-            start = (wc * 3) / 2.0 
-            row << [" " * start, cp, " " * ((wc * 3) - start - 1)].join("")
-            srow << " #{st} "
-            next
-          end
-        end
-
-        row << "   "
-        srow << "   "
-      end
-
-      rows << "|#{row.join("|")}|"
-      rows << "|#{srow.join("|")}|"
-      rows << "|#{drow.join("|")}|"
-    end
-
-    "\n#{rows.join("\n")}\n"
-  end
-end
+require_relative "./helpers/session_helpers"
 
 module Oozey
   module Harness
@@ -118,6 +53,7 @@ module Oozey
   class Test
     include Hypothesis
     include Matchers
+    include ::SessionHelpers
   end
 end
 
@@ -133,25 +69,6 @@ def get_block_by_type(block, type)
   nil
 end
 
-def get_blocks_by_type(block, type, results = [])
-  if block.node.ast.type == type
-    results << block
-
-    return
-  end
-
-  block.children.each do |child|
-    get_blocks_by_type(child, type, results)
-  end
-
-  results
-end
-
 eval ruby_file("ooze/terminal.rb")
-
-# Renders a session in ASCII on the screen
-def render(session)
-  TestRender.new(session).render
-end
 
 Oozey::Hypothesis.run!

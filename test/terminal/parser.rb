@@ -8,14 +8,6 @@ class ParserTest < Oozey::Test
     Ooze::Terminal::Session.new(pty)
   end
 
-  def dec_code(key)
-    0x80 | Ooze::Terminal::DEC_MN_CODE_TABLE[key]
-  end
-
-  def code(key)
-    Ooze::Terminal::ASCII_CODE_TABLE[key]
-  end
-
   def parse(str)
     tokens = []
     i = 0
