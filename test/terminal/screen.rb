@@ -1,55 +1,6 @@
 class TerminalScreenTest < Oozey::Test
   let(:pty) do
-    Struct.new(:rows, :cols).new(5, 20)
-  end
-
-  def row(line)
-    trans = line.codepoints.map do |cp|
-      case cp
-      when nil
-        "_"
-      when :continue
-        "*"
-      else
-        cp.chr("UTF-8")
-      end
-    end
-
-    trans.join("").gsub(/_+$/, "")
-  end
-
-  def styles(line)
-    line.attrs.reject(&:nil?).join("")
-  end
-
-  def insert(line, col, char)
-    line.insert(col, char.ord, 0)
-    row(line)
-  end
-
-  def replace(line, cursor, char)
-    line.replace(cursor, char.ord, 0)
-    row(line)
-  end
-
-  def line(chars, max = 8)
-    line = Ooze::Terminal::Line.new(max)
-    counter = 0
-
-    chars.split("").each do |char|
-      replace(line, counter, char)
-      counter += char.width
-    end
-
-    line
-  end
-
-  def parse(str, rows: 8, cols: 8)
-    seq = Ooze::Terminal::SEQ[str].pack("U*").freeze
-    pty = Struct.new(:rows, :cols).new(rows, cols)
-    session = Ooze::Terminal::Session.new(pty)
-    session.parser.parse(seq)
-    session
+    Struct.new(:size).new([5, 20])
   end
 
   before_each do

@@ -75,7 +75,17 @@ module Ooze
       0x79 => '≤', 0x7A => '≥', 0x7B => 'π', 0x7C => '≠', 0x7D => '£', 0x7E => '·', 
     }.freeze
 
+    # Public: A helper class to parse ANSI Escape Sequences
     class SEQ
+      # Public: Return an array of codepoints for (str)
+      #         tokens should be separated by a space
+      #         if the token is contained in quotes, it will be parsed as a string
+      #         if the token is a lowercase word with more than one char, it will be parsed as a control
+      #         if the tokens is an uppercase word, it will be parsed as a ruby constant which holds the output of SEQ[]
+      # 
+      # str - the string to parse
+      # kwargs - keyword args
+      #          charset - :ascii or :dec_graphics
       def self.[](str, charset: :ascii)
         tokens = str.split(" ")
         values = []

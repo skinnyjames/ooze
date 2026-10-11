@@ -1,7 +1,7 @@
 class ParserTest < Oozey::Test
   UNICODE_REPLACE = "\uFFFD"
   let(:pty) do
-    Struct.new(:rows, :cols).new(50, 50)
+    Struct.new(:size).new([50, 50])
   end
 
   let(:session) do

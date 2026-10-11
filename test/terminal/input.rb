@@ -1,6 +1,6 @@
 class InputTest < Oozey::Test
   let(:pty) do
-    Struct.new(:rows, :cols).new(50, 50)
+    Struct.new(:size).new([50, 50])
   end
 
   let(:session) do
