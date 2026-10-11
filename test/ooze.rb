@@ -24,6 +24,9 @@ module Matchers
   end
 end
 
+
+require_relative "./helpers/session_helpers"
+
 module Oozey
   module Harness
     include Theorem::Control::Harness
@@ -36,7 +39,6 @@ module Oozey
 
         eval File.read(file)
       end
-
 
       filtered_registry({})
     end
@@ -51,6 +53,7 @@ module Oozey
   class Test
     include Hypothesis
     include Matchers
+    include ::SessionHelpers
   end
 end
 
@@ -66,19 +69,6 @@ def get_block_by_type(block, type)
   nil
 end
 
-def get_blocks_by_type(block, type, results = [])
-  if block.node.ast.type == type
-    results << block
-
-    return
-  end
-
-  block.children.each do |child|
-    get_blocks_by_type(child, type, results)
-  end
-
-  results
-end
-
 eval ruby_file("ooze/terminal.rb")
+
 Oozey::Hypothesis.run!

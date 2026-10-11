@@ -1,16 +1,11 @@
 class ParserTest < Oozey::Test
   UNICODE_REPLACE = "\uFFFD"
+  let(:pty) do
+    Struct.new(:rows, :cols).new(50, 50)
+  end
 
   let(:session) do
-    Ooze::Terminal::Session.new(nil)
-  end
-
-  def dec_code(key)
-    0x80 | Ooze::Terminal::DEC_MN_CODE_TABLE[key]
-  end
-
-  def code(key)
-    Ooze::Terminal::ASCII_CODE_TABLE[key]
+    Ooze::Terminal::Session.new(pty)
   end
 
   def parse(str)
@@ -91,14 +86,10 @@ class ParserTest < Oozey::Test
     end
     expect(tokens.size).to eql(3)
   end
-end
 
-class InputTest < Oozey::Test
-  let(:session) do
-    Ooze::Terminal::Session.new(nil)
-  end
-  
-  test "basic ansi" do
-    expect(session.input.prev_screen.pack("C*")).to eql("\e[5~")
+  test "Terminal modes come froim csi_dispatch actions" do
+    parse("\e[2a") do |action, i|
+      expect(action.type).to eql(:csi_dispatch)
+    end
   end
 end
