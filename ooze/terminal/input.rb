@@ -1,151 +1,221 @@
 module Ooze
   module Terminal
-    # Public: Map for sending codes back to the terminal
-    #         https://www.vt100.net/docs/vt220-rm/chapter3.html#S3.2.3
+    # Handles all input to the PTY
     #
+    # Started VT200 compat, but it's outdated for a lot of use cases.
+    # xterm may not be fully implemented.
     class Input
       attr_reader :session
+      # https://invisible-island.net/xterm/ctlseqs/ctlseqs.html#h3-PC-Style-Function-Keys
+      # https://en.wikipedia.org/wiki/ANSI_escape_code#Terminal_input_sequences
+      PC_FUNCTION_KEYS = {
+        up:         SEQP["?? ?? A"], 
+        down:       SEQP["?? ?? B"], 
+        right:      SEQP["?? ?? C"], 
+        left:       SEQP["?? ?? D"],
+        home:       SEQP["?? ?? H"], 
+        end:        SEQP["?? ?? F"], 
+        insert:     SEQP["CSI 2 ?? ~"], 
+        delete:     SEQP["CSI 3 ?? ~"],
+        page_up:    SEQP["CSI 5 ?? ~"], 
+        page_down:  SEQP["CSI 6 ?? ~"], 
+        f1:         SEQP["?? ?? P"], 
+        f2:         SEQP["?? ?? Q"], 
+        f3:         SEQP["?? ?? R"], 
+        f4:         SEQP["?? ?? S"], 
+        f5:         SEQP["CSI 1 5 ?? ~"], 
+        f6:         SEQP["CSI 1 7 ?? ~"], 
+        f7:         SEQP["CSI 1 8 ?? ~"], 
+        f8:         SEQP["CSI 1 9 ?? ~"], 
+        f9:         SEQP["CSI 2 0 ?? ~"], 
+        f10:        SEQP["CSI 2 1 ?? ~"], 
+        f11:        SEQP["CSI 2 3 ?? ~"], 
+        f12:        SEQP["CSI 2 4 ?? ~"],
+        # back to vt220 keys (For reference)
+        # https://www.vt100.net/docs/vt220-rm/chapter3.html
+        # We will never get these keys.
+        f13:        SEQ["CSI 2 5 ~"],
+        f14:        SEQ["CSI 2 6 ~"],
+        f15:        SEQ["CSI 2 8 ~"],
+        f16:        SEQ["CSI 2 9 ~"],
+        f17:        SEQ["CSI 3 1 ~"],
+        f18:        SEQ["CSI 3 2 ~"],
+        f19:        SEQ["CSI 3 3 ~"],
+        f20:        SEQ["CSI 3 4 ~"],
+      }
 
-      def cmodes
-        @control_modes ||= {
-          ctrl: false, lock: false, shift: false,
-          composing: false
-        }
-      end
+      # 3.2.5 Control Codes
+      # https://www.vt100.net/docs/vt220-rm/chapter3.html#S3.2.5
+      CTRL_CODES = {
+        " " => "nul", "2" => "nul", "a" => "soh", "b" => "stx",
+        "c" => "etx", "d" => "eot", "e" => "enq", "f" => "ack",
+        "g" => "bel", "h" => "bs", "i" => "ht", "j" => "lf",
+        "k" => "vt", "l" => "ff", "m" => "cr", "n" => "so", "o" => "si",
+        "p" => "dle", "q" => "dc1", "r" => "dc2", "s" => "dc3", "t" => "dc4",
+        "u" => "nak", "v" => "syn", "w" => "etb", "x" => "can", "y" => "em",
+        "z" => "sub", "3" => "esc", "[" => "esc", "4" => "fs", "/" => "fs",
+        "5" => "gs", "]" => "gs", "6" => "rs", "~" => "rs", "7" => "us", "?" => "us",
+        "8" => "del" 
+      }
 
-      def initialize(session)
-        @session = session
-      end
-      
-      FIND =            SEQ["CSI 1 ~"].freeze
-      INSERT_HERE =     SEQ["CSI 2 ~"].freeze
-      DELETE =          SEQ["CSI 3 ~"].freeze
+      # Cascade terminal modes
+      KEYBOARD = {
+        space: "sp", backspace: "del", tab: "ht", escape: "esc",
+        enter: "cr"
+      }
 
-      # Editing
-      SELECT =          SEQ["CSI 4 ~"].freeze
-      PREV_SCREEN =     SEQ["CSI 5 ~"].freeze
-      NEXT_SCREEN =     SEQ["CSI 6 ~"].freeze
-
-      # Cursor (Normal)
-      UP =              SEQ["CSI A"].freeze
-      DOWN =            SEQ["CSI B"].freeze
-      RIGHT =           SEQ["CSI C"].freeze
-      LEFT =            SEQ["CSI D"].freeze
-
-      # Cursor (Application)
-      APP_UP =          SEQ["SS3 A"].freeze
-      APP_DOWN =        SEQ["SS3 B"].freeze
-      APP_RIGHT =       SEQ["SS3 C"].freeze
-      APP_LEFT =        SEQ["SS3 D"].freeze
-
-      # Function keys
-      F6 =              SEQ["CSI 1 7 ~"].freeze
-      F7 =              SEQ["CSI 1 8 ~"].freeze
-      F8 =              SEQ["CSI 1 9 ~"].freeze
-      F9 =              SEQ["CSI 2 0 ~"].freeze
-      F10 =             SEQ["CSI 2 1 ~"].freeze
-      F11 =             SEQ["CSI 2 3 ~"].freeze
-      F12 =             SEQ["CSI 2 4 ~"].freeze
-      F13 =             SEQ["CSI 2 5 ~"].freeze
-
-      F14 =             SEQ["CSI 2 6 ~"].freeze
-      F15 =             SEQ["CSI 2 8 ~"].freeze
-      F16 =             SEQ["CSI 2 9 ~"].freeze
-      F17 =             SEQ["CSI 3 1 ~"].freeze
-      F18 =             SEQ["CSI 3 2 ~"].freeze
-      F19 =             SEQ["CSI 3 3 ~"].freeze
-      F20 =             SEQ["CSI 3 4 ~"].freeze
-
-      # F11_ALT = (CSI + [ASCII_CODE_TABLE['2'], ASCII_CODE_TABLE['3'], ASCII_CODE_TABLE[:esc]]).freeze
-      # F12_ALT = (CSI + [ASCII_CODE_TABLE['2'], ASCII_CODE_TABLE['3'], ASCII_CODE_TABLE[:bs]]).freeze
-      # F13_ALT = (CSI + [ASCII_CODE_TABLE['2'], ASCII_CODE_TABLE['3'], ASCII_CODE_TABLE[:lf]]).freeze
+      KEYBOARD_LNM = {
+        enter: "cr lf"
+      }
 
       # Aux Keypad (Numeric Mode)
       # https://www.vt100.net/docs/vt220-rm/chapter3.html#S3.2.3
-      KEYPAD_NUMS = {}
-      (0..9).each do |num|
-        KEYPAD_NUMS[num.to_s] = SEQ[num.to_s].freeze
-      end
-      KEYPAD_NUMS['-'] =  SEQ["-"].freeze
-      KEYPAD_NUMS[','] =  SEQ[","].freeze
-      KEYPAD_NUMS['.'] =  SEQ["."].freeze
-      KEYPAD_NUMS[:pf1] = SEQ["SS3 P"].freeze
-      KEYPAD_NUMS[:pf2] = SEQ["SS3 Q"].freeze
-      KEYPAD_NUMS[:pf3] = SEQ["SS3 R"].freeze
-      KEYPAD_NUMS[:pf4] = SEQ["SS3 S"].freeze
-      KEYPAD_NUMS[:enter] = nil # Explicity marking that enter depends on the linefeed mode.
-      KEYPAD_NUMS.freeze
+      # 
+      # This is a reference implementation, after all.
+      # Let. me. cook.
+      KEYPAD_NUMS = {
+        kp0: "0", kp1: "1", kp2: "2", kp3: "3", kp4: "4",
+        kp5: "5", kp6: "6", kp7: "7", kp8: "8", kp9: "9",
+        kpminus: "-", kpcomma: ",", kpperiod: ".", kpenter: "cr"
+        # No pf1..etc, raylib doesn't support it and most keyboards don't.
+      }
+
+      KEYPAD_NUMS_LNM = {
+        kpenter: "cr lf",
+      }
 
       # Aux Keypad (Application Mode)
       # https://www.vt100.net/docs/vt220-rm/chapter3.html#S3.2.3
-      KEYPAD_APPS = {}
-      {
-        '0' => 'p', '1' => 'q', '2' => 'r', '3' => 's', '4' => 't',
-        '5' => 'u', '6' => 'v', '7' => 'w', '8' => 'x', '9' => 'y',
-        '-' => 'm', ',' => 'l', '.' => 'n', :enter => 'M', :pf1 => 'P',
-        :pf2 => 'Q', :pf3 => 'R', :pf4 => 'S'
-      }.each do |k, v|
-        KEYPAD_APPS[k] = SEQ["SS3 #{v}"].freeze
+      KEYPAD_APPS = {
+        kp0: 'SS3 p', kp1: 'SS3 q', kp2: 'SS3 r', kp3: 'SS3 s', kp4: 'SS3 t',
+        kp5: 'SS3 u', kp6: 'SS3 v', kp7: 'SS3 w', kp8: 'SS3 x', kp9: 'SS3 y',
+        kpminus: 'SS3 m', kpcomma: 'SS3 l', kpperiod: 'SS3 n', kpenter: 'SS3 M'
+      }
+
+      [CTRL_CODES, KEYBOARD, KEYBOARD_LNM, KEYPAD_NUMS, KEYPAD_NUMS_LNM, KEYPAD_APPS].each do |const|
+        const.transform_values! do |value|
+          SEQ[value].freeze
+        end
+
+        const.freeze
+      end
+      
+      def initialize(session)
+        @session = session
       end
 
-      SPACE =         SEQ["sp"].freeze
-      BACKSPACE =     SEQ["del"].freeze
-      TAB =           SEQ["ht"].freeze
+      def write(seq)
+        session.write seq.pack("U*")
+      end
 
-      RETURN_LF_ON =  SEQ["cr lf"].freeze
-      RETURN_LF_OFF = SEQ["cr"].freeze
+      def keypress(key, modifiers)
+        param = modifiers_to_param(modifiers)
 
-      # TODO: Control codes
-      # https://www.vt100.net/docs/vt220-rm/chapter3.html#S3.2.5
-      
+        # Function key handling
+        if seqp = PC_FUNCTION_KEYS[key]
+          case seqp.count
+          when 1
+            param = param == 1 ? "" : "; #{param}"
+            write seqp.complete(["#{param}"])
+          when 2
+            # Okay, so SS3 can't take parameters
+            # so if there are <any> modifiers; switch to CSI.
+            # But.
+            # If there are no params, we want to use CSI unless cursor key application mode is on
+            # Unless. it's F1..F4, then we don't care - SS3.
+            param = param == 1 ? "" : "1 ; #{param}"
+            prefix = session.modes[:decckm] ? "SS3" : "CSI"
 
-      # Functions
-      def csi = CSI
-      def find = FIND
-      def insert_here = INSERT_HERE
-      def delete = DELETE
-      def select = SELECT
-      
-      # xterm modifiers
-      def end = SELECT
-      def home = FIND
+            prefix = "SS3" if [:f1, :f2, :f3, :f4].include?(key) 
+            prefix = "CSI" if !param.empty?
 
-      def prev_screen = PREV_SCREEN
-      def next_screen = NEXT_SCREEN
-      def up = session.modes[:decckm] ? APP_UP : UP
-      def down = session.modes[:decckm] ? APP_DOWN : DOWN
-      def right = session.modes[:decckm] ? APP_RIGHT : RIGHT
-      def left = session.modes[:decckm] ? APP_LEFT : LEFT
-      def space = SPACE
-      def backspace = BACKSPACE
-      def tab = TAB
-      def keypad(key)
-        if session.modes[:deckpam]
-          KEYPAD_APPS[key]
-        elsif key == :enter
-          enter
+            write seqp.complete([prefix, param])
+          end
         else
-          KEYPAD_NUMS[key]
+          # Keyboard / Keypad
+          if KEYPAD_APPS[key] && session.modes[:deckpam]
+            seq = KEYPAD_APPS[key]
+          elsif KEYPAD_NUMS[key] && session.modes[:lnm]
+            seq = KEYPAD_NUMS_LNM[key] || KEYPAD_NUMS[key]
+          elsif KEYPAD_NUMS[key]
+            seq = KEYPAD_NUMS[key]
+          elsif  KEYBOARD[key] && session.modes[:lnm]
+            seq = KEYBOARD_LNM[key] || KEYBOARD[key]
+          elsif KEYBOARD[key]
+            seq = KEYBOARD[key]
+          end
+
+          return unless seq
+          seq = SEQ["CSI Z"] if key == :tab && modifiers[:shift]
+          seq = SEQ["esc"] + seq if modifiers[:alt]
+          write seq
         end
       end
 
-      def f6 = F6
-      def f7 = F7
-      def f8 = F8
-      def f9 = F9
-      def f10 = F10
-      def f11 = F11
-      def f12 = F12
-      def f13 = F13
-      def f14 = F14
-      def f15 = F15
-      def f16 = F16
-      def f17 = F17
-      def f18 = F18
-      def f19 = F19
-      def f20 = F20
+      def print(char, modifiers)
+        if modifiers[:control] && (seq = CTRL_CODES[char.downcase])
+          seq = SEQ["esc"] + seq if modifiers[:alt]
+          write seq
+        else
+          seq = char.codepoints
+          seq = SEQ["esc"] + seq if modifiers[:alt]
+          write seq
+        end
+      end
 
-      def enter = session.modes[:lnm] ? RETURN_LF_ON : RETURN_LF_OFF
+      def paste(text)
+        seq = text.codepoints.reject { |cp| cp == ASCII_CODE_TABLE[:esc] }
+
+        if session.modes[:bracketpaste]
+          seq = SEQ["CSI 2 0 0 ~"] + seq + SEQ["CSI 2 0 1 ~"]
+        end
+        write seq
+      end
+
+      def focused(value = true)
+        return unless session.modes[:focusevents]
+
+        write SEQ[value ? "CSI I" : "CSI O"]
+      end
+
+      # In order to support F1-F5, we also need to support PC style function keys.
+      # which means also considering modifiers.
+      #
+      # In normal mode, i.e., a Sun/PC keyboard when the sunKeyboard resource is
+      # false (and none of the other keyboard resources such as oldXtermFKeys
+      # resource is set), xterm encodes function key modifiers as parameters
+      # appended before the final character of the control sequence.  As a
+      # special case, the SS3  sent before F1 through F4 is altered to CSI  when
+      # sending a function key modifier as a parameter.
+      # Code     Modifiers
+      # 2     | Shift
+      # 3     | Alt
+      # 4     | Shift + Alt
+      # 5     | Control
+      # 6     | Shift + Control
+      # 7     | Alt + Control
+      # 8     | Shift + Alt + Control
+      # 9     | Meta
+      # 10    | Meta + Shift
+      # 11    | Meta + Alt
+      # 12    | Meta + Alt + Shift
+      # 13    | Meta + Ctrl
+      # 14    | Meta + Ctrl + Shift
+      # 15    | Meta + Ctrl + Alt
+      # 16    | Meta + Ctrl + Alt + Shift
+      # 
+      # Public: Computes the derived CSI params
+      #         from a hash of modifiers.
+      #         If result is 1, no modifier is present.
+      def modifiers_to_param(modifiers)
+        flags = 0
+        flags |= 1 if modifiers[:shift]
+        flags |= 2 if modifiers[:alt]
+        flags |= 4 if modifiers[:control]
+        flags |= 8 if modifiers[:meta]
+        
+        flags + 1
+      end
     end
   end
 end

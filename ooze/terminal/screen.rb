@@ -181,6 +181,8 @@ module Ooze
         @margin_top = 0
         @margin_bottom = rows - 1
 
+        @on_evicted = nil
+
         # An array of unique style objects (index is the style id)
         @styles = []
         # A lookup of styles => @styles index
@@ -194,6 +196,47 @@ module Ooze
         @default_style_id = @current_style_id
 
         setup_tabstops
+      end
+
+      def on_evicted(&block)
+        @on_evicted = block
+      end
+
+      def runs(&block)
+        run = []
+        default_id = @default_style_id
+        sid = lines[0]&.attrs[0] || default_id
+
+        lines.each do |line|
+          last = line.codepoints.rindex { |i| !i.nil? }
+
+          if last.nil?
+            yield :newline
+            next
+          end
+          
+          (0..last).each do |idx|
+            attr = line.attrs[idx] || default_id
+            cp = line.codepoints[idx]
+        
+            if sid != attr
+              yield [run.pack("U*"), styles[sid]]
+
+              run.clear
+              sid = attr
+            end
+
+            if cp.nil?
+              run << SEQR["sp"]
+            elsif cp != :continue
+              run << cp
+            end
+          end
+
+          yield [run.pack("U*"), styles[sid]]
+          run.clear
+          yield :newline
+        end
       end
 
       def reset_style
@@ -235,7 +278,7 @@ module Ooze
       def evict(line)
         return if skip_evict
 
-        default_id = intern(Style.new)
+        default_id = @default_style_id
         current_id = line.attrs[0] || default_id
         runs = []
         chars = ""
@@ -268,6 +311,7 @@ module Ooze
           runs[-1][:chars] << "\n"
         end
 
+        @on_evicted&.call(runs)
         scrollback.concat runs
       end
       
@@ -401,7 +445,7 @@ module Ooze
         count = 1 if count.zero?
 
         count.times do
-          current_line.insert(cursor.col, SEQR["sp"], intern(Style.new))
+          current_line.insert(cursor.col, SEQR["sp"], @default_style_id)
         end
       end
 
@@ -413,7 +457,7 @@ module Ooze
 
           current_line.codepoints << SEQR["sp"]
           current_line.widths << 1
-          current_line.attrs << intern(Style.new)
+          current_line.attrs << @default_style_id
         end
       end
 
@@ -428,7 +472,7 @@ module Ooze
         count.times do |a|
           i = [cursor.col + a, cols - 1].min
 
-          current_line.blank(i, intern(Style.new), blank_nil: true)
+          current_line.blank(i, @default_style_id, blank_nil: true)
         end
       end
 
@@ -448,7 +492,7 @@ module Ooze
         # ignore bad modes
         if range = ranges[mode]
           range.each do |i|
-            line.blank(i, intern(Style.new), blank_nil: true)
+            line.blank(i, @default_style_id, blank_nil: true)
           end
         end
       end
