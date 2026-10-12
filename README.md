@@ -19,6 +19,15 @@ ls *.png | oz img | xargs rm
 ```
 The `oz` shell script will send an ANSI OSC sequence to the GUI, which looks for a plugin registered to img. If it exists, the plugin will mounted and its on_ready method will be invoked with the calling directory, the payload argument, and a block callback for returning a reply.
 
+## Building
+
+This project is built with [hokusai-pocket](https://github.com/skinnyjames/hokusai-pocket).
+
+Download a new release, clone this project and run `hokusai-pocket @rebuild` from it.
+A new binary with added mrbgems will be built in `./bin` and you can run `./bin/hokusai-pocket run:target=ooze.rb` to start the emulator.
+
+You can also run the tests with `./bin/hokusai-pocket run:target=test/ooze.rb`
+
 ## Goals
 
 One of the design goals of this project is to expose VT100/200 behaviors in a more readable / understandable way.  This project also allows for UTF-8 in printed content, OSC (_Operating System Command_) strings and, DCS (_Device Control String_) passthroughs.
