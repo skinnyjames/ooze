@@ -1,0 +1,90 @@
+#!/bin/sh
+# oz - open an Ooze plugin from the shell.
+#
+#   oz PLUGIN [ARGS...]
+#
+# The payload is the arguments joined by spaces, or stdin when something is
+# piped in. Whatever the plugin answers is printed on stdout, so it works in
+# pipelines:
+#
+#   ls | oz img | pbcopy
+#
+# Exit status: 0 answered, 1 cancelled, 2 could not ask.
+
+die() {
+  printf 'oz: %s\n' "$1" >&2
+  exit 2
+}
+
+[ $# -gt 0 ] || { echo "usage: oz PLUGIN [ARGS...]" >&2; exit 2; }
+[ -n "$OOZE_TOKEN" ] || die "not running inside Ooze"
+[ -z "$SSH_CONNECTION" ] || die "only works in a local Ooze shell"
+
+ESC=$(printf '\033')
+BEL=$(printf '\007')
+PLUGIN=$1
+shift
+
+# try to decode with -d
+if printf 'aGk=' | base64 -d >/dev/null 2>&1; then
+  # new osx and linux
+  decode() { base64 -d; }
+else
+  # old osx
+  decode() { base64 -D; }
+fi
+
+encode() { base64 | tr -d '\n'; }
+correlation_id="$$-$(od -An -N4 -tu4 /dev/urandom | tr -d ' ')"
+original_settings=$(stty -g </dev/tty 2>/dev/null) || die "no terminal"
+
+# send(command, plugin, payload)
+send() {
+  printf '%s]00z3;%s;%s;%s;%s;%s%s' "$ESC" "$OOZE_TOKEN" "$1" "$correlation_id" "$2" "$3" "$BEL" >/dev/tty 2>/dev/null
+}
+
+# if we die before an answer, put the tty back and close the widget
+abort() {
+  stty "$original_settings" </dev/tty 2>/dev/null
+  send "cancel" "$PLUGIN" ""
+}
+
+trap abort EXIT
+trap 'exit 1' INT TERM HUP
+
+# no echo, and no line buffering (ICANON)
+stty -echo -icanon min 1 time 0 </dev/tty
+
+send "start" "$PLUGIN" "$(printf '%s' "$(pwd -P)" | encode)"
+
+if [ $# -gt 0 ]; then
+  # args given: send them as a single chunk
+  send "data" "$PLUGIN" "$(printf '%s' "$*" | encode)"
+elif [ ! -t 0 ]; then
+  # stdin is piped: stream it
+  while :; do
+    chunk=$(dd bs=3072 count=1 2>/dev/null | encode)
+    [ -n "$chunk" ] || break   # EOF
+    send "data" "$PLUGIN" "$chunk"
+  done
+fi
+
+send "done" "$PLUGIN" ""
+
+reply=
+while :; do
+  chunk=$(dd bs=65536 count=1 </dev/tty 2>/dev/null)
+  [ -n "$chunk" ] || break
+  reply=$reply$chunk
+  case $reply in *"$BEL"*) break ;; esac
+done
+reply=${reply%%"$BEL"*}
+
+trap - EXIT INT TERM HUP
+stty "$original_settings" </dev/tty 2>/dev/null
+
+case $reply in
+  *";reply;$correlation_id;"*) printf '%s' "${reply##*;}" | decode; printf '\n'; exit 0 ;;
+  *) exit 1 ;;
+esac
+

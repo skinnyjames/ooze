@@ -1,6 +1,18 @@
 module Ooze
   module Terminal
     class Session
+      def self.spawn(rows, cols, shell = "bash")
+        shell = ENV["SHELL"] || shell
+        token = Sysrandom.base64
+        ENV["OOZE_TOKEN"] = token
+        
+        shell_dir = File.expand_path(ENV.fetch("OOZE_SHELL_DIR", "assets/shell"))
+        ENV["PATH"] = "#{ENV["PATH"]}:#{shell_dir}"
+
+        pty = PTY.spawn(shell, rows, cols)
+        new(pty, secret: token)
+      end
+
       # Possible Terminal Modes
       # KAM (Keyboard Action)
       # IRM (Insert Replace)
@@ -57,12 +69,12 @@ module Ooze
         }
       end
 
-      attr_accessor :ambiguous_width
+      attr_accessor :ambiguous_width, :secret
       attr_reader :pty, :parser, :input, :charset
 
       PTY_BUFFER_SIZE = 1024
 
-      def initialize(pty)
+      def initialize(pty, secret: nil)
         @pty = pty
         rows, cols = pty.size
   
@@ -71,6 +83,9 @@ module Ooze
         @screen = Screen.new(self, rows, cols)
         @altscreen = Screen.new(self, rows, cols)
         @altscreen.skip_evict = true
+
+        @secret = secret
+        @on_plugin = nil
 
         @ambiguous_width = 1
         @charset = :ascii
@@ -296,6 +311,39 @@ module Ooze
         when '52'
           # clipboard
           @on_clipboard&.call(text)
+        when '00z3'
+          # ooze handler
+          # request shape: "00z3;<token>;<cmd>;<correlationid>;<plugin>;<base64 payload>"
+          token, command, id, plugin_name, payload = text.split(";", 5)
+          return unless token == secret
+
+          on_cancel = Proc.new do
+            response = "00z3;cancel;#{id}"
+            input.write OSC + response.codepoints + SEQ["bel"]
+
+            @on_plugin&.call(:closed, id)
+          end
+
+          on_reply = Proc.new do |text|
+            encoded = b64_encode(text)
+            response = "00z3;reply;#{id};#{encoded}"
+            input.write OSC + response.codepoints + SEQ["bel"]
+
+            @on_plugin&.call(:closed, id)
+          end
+
+          case command
+          when "start"
+            @on_plugin&.call(:start, id, plugin_name, b64_decode(payload.to_s), on_reply, on_cancel)
+          when "data"
+            @on_plugin&.call(:data, id, b64_decode(payload.to_s))
+          when "done"
+            @on_plugin&.call(:done, id)
+          when "cancel"
+            @on_plugin&.call(:cancel, id)
+          when "error"
+            @on_plugin&.call(:error, id)
+          end
         end
       end
 
@@ -409,6 +457,10 @@ module Ooze
         @altscreen.cursor.row = cursor.row
         @altscreen.cursor.col = cursor.col
       end
+      
+      def on_plugin(&block)
+        @on_plugin = block
+      end
 
       private
       # From https://vt100.net/docs/vt220-rm/chapter4.html
@@ -419,6 +471,14 @@ module Ooze
         else
           param
         end
+      end
+
+      def b64_decode(str)
+        str.unpack("m").first.to_s
+      end
+
+      def b64_encode(str)
+        [str].pack("m").delete("\n")
       end
     end
   end

@@ -1,5 +1,35 @@
 require_relative "./screen"
 
+class Ooze::UI::PluginResponse
+  def initialize(on_reply, on_cancel)
+    @on_reply = on_reply
+    @on_cancel = on_cancel
+  end
+
+  def reply(data)
+    @on_reply.call(data)
+  end
+
+  def cancel
+    @on_cancel.call
+  end
+end
+
+class Ooze::UI::Container < Hokusai::Block
+  template <<-EOF
+  [template]
+    virtual
+  EOF
+
+  computed! :block
+
+  def initialize(**args)
+    super
+
+    node.meta.set_child(0, block)
+  end
+end
+
 class Ooze::UI::Session < Hokusai::Block
   style <<-EOF
   [style]
@@ -12,20 +42,26 @@ class Ooze::UI::Session < Hokusai::Block
   
   template <<-EOF
   [template]
-    panel { @keypress="on_keypress" background="94,163,39"}
-      screen { :width="width" :size="size"  }
+    vblock
+      [if="plugin"]
+        container { :block="plugin" }
+      [else]
+        panel { @keypress="on_keypress" background="94,163,39"}
+          screen { :width="width" :size="size"  }
   EOF
 
   uses(
+    vblock: Hokusai::Blocks::Vblock,
     panel: Hokusai::Blocks::Panel,
     screen: Ooze::UI::Screen,
+    container: Ooze::UI::Container,
   )
 
   provide :session, :session
   provide :new_runs, :new_runs
   computed :size, default: 15, convert: proc(&:to_i)
 
-  attr_accessor :rows, :cols, :width
+  attr_accessor :rows, :cols, :width, :plugin
 
   HOKUSAI_TO_INPUT = {
     kp_0: :kp0, kp_1: :kp1, kp_2: :kp2, kp_3: :kp3, kp_4: :kp4,
@@ -42,6 +78,12 @@ class Ooze::UI::Session < Hokusai::Block
     @rows = (canvas.height / size).floor
   end
 
+  def initialize(**args)
+    @plugin = nil
+
+    super
+  end
+
   def clear_new_scrollback
     new_runs.clear
   end
@@ -54,13 +96,37 @@ class Ooze::UI::Session < Hokusai::Block
     return unless rows && cols
 
     @session ||= begin
-      shell = ENV["SHELL"] || "bash"
-      pty = PTY.spawn(shell, rows, cols)
-      pty.set_size(rows, cols, 0, 0)
-      session = Ooze::Terminal::Session.new(pty)
+      session = Ooze::Terminal::Session.spawn(rows, cols)
       session.screen.on_evicted do |runs|
         new_runs.concat runs
       end
+
+      session.on_plugin do |command, id, *args|
+        case command
+        when :start
+          plugin_name, cwd, on_reply, on_cancel = args
+          response = Ooze::UI::PluginResponse.new(on_reply, on_cancel)
+          if plugin_class = Ooze.plugins[plugin_name]
+            self.plugin = plugin_class.mount("root", nil, providers: { response: ->() {response} })
+            plugin.on_start(cwd.strip) if plugin.respond_to?(:on_start)
+          else
+            on_cancel.call
+          end
+        when :data
+          plugin&.on_data(args[0]) if plugin&.respond_to?(:on_data)
+        when :done
+          id = args[0]
+          plugin&.on_data_complete if plugin&.respond_to?(:on_data_complete)
+        when :closed
+          self.plugin = nil
+        when :cancel
+          plugin&.on_cancel if plugin&.respond_to?(:on_cancel)
+          self.plugin = nil
+        when :error
+          plugin&.on_error if plugin&.respond_to?(:on_error)
+        end
+      end
+
       session
     end
   end
@@ -73,10 +139,6 @@ class Ooze::UI::Session < Hokusai::Block
     if session.pty.exited?
       Hokusai.close_window
     end
-  end
-
-  def initialize(**args)
-    super
   end
 
   def pack(seq)

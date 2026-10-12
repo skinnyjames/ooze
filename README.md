@@ -4,11 +4,7 @@
 
 A zero dependency tiling terminal emulator in progress that can be extended with UI plugins (Ruby). 
 
-Based on the same idea from [Krang](https://github.com/skinnyjames/krang) but approached from scratch according to spec without an LLM.
-
-## Similarities to Krang
-
-The value proposition is the same. 
+## About
 
 > I wanted to make something to prove the viability of writing efficient and interesting desktop applications with hokusai-pocket
 
@@ -21,22 +17,30 @@ In the terminal PTY, when a user types something like
 ```bash
 ls *.png | oz img | xargs rm
 ```
-The `oz` shell script sends an ANSI OSC sequence to the GUI, which looks for a plugin registered to img. If it exists, the plugin is mounted and its on_ready method will be invoked with the calling directory, the payload argument, and a block callback for returning a reply.
+The `oz` shell script will send an ANSI OSC sequence to the GUI, which looks for a plugin registered to img. If it exists, the plugin will mounted and its on_ready method will be invoked with the calling directory, the payload argument, and a block callback for returning a reply.
 
+## Building
 
-## Differences from Krang
+This project is built with [hokusai-pocket](https://github.com/skinnyjames/hokusai-pocket).
 
-Krang was generated with the help of an LLM to prove out the idea using hokusai-pocket.  Ooze will be LLM free.
+Download a new release, clone this project and run `hokusai-pocket @rebuild` from it.
+A new binary with added mrbgems will be built in `./bin` and you can run `./bin/hokusai-pocket run:target=ooze.rb` to start the emulator.
 
-One of the design goals of this project is to expose VT100/200 behaviors in a more readable / understandable way.  This project also allows for UTF-8 in printed content, OSC (_Operating System Command_) strings and, DCS (_Device Control String_) passthroughs.  
+You can also run the tests with `./bin/hokusai-pocket run:target=test/ooze.rb`
+
+## Goals
+
+One of the design goals of this project is to expose VT100/200 behaviors in a more readable / understandable way.  This project also allows for UTF-8 in printed content, OSC (_Operating System Command_) strings and, DCS (_Device Control String_) passthroughs.
+
+Full [xterm ctrlseq](https://invisible-island.net/xterm/ctlseqs/ctlseqs.html) compatibility is a secondary goal, but not the top priority.
 
 There is a test suite that will work through the terminal logic without needing a PTY.
 
-I'm dropping Windows support from this project because I will not be bothered to spend a lot of time learning ConPTY idiosyncrasies.  If you want Windows support, use [Krang](https://github.com/skinnyjames/krang)
+There is no Windows support. I will not be bothered to spend a lot of time learning Win32 APIs and ConPTY idiosyncrasies.  
+If you want Windows support, use [Krang](https://github.com/skinnyjames/krang)
 
 * UTF-8 Support
 * Reference implementation
-* No windows support
 
 ## License
 
