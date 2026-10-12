@@ -103,10 +103,10 @@ module SessionHelpers
     line
   end
 
-  def parse(str, rows: 8, cols: 8, using: nil)
+  def parse(str, rows: 8, cols: 8, using: nil, secret: nil)
     seq = Ooze::Terminal::SEQ[str].pack("U*").freeze
     pty = Struct.new(:size).new([rows, cols])
-    session = using || Ooze::Terminal::Session.new(pty)
+    session = using || Ooze::Terminal::Session.new(pty, secret: secret)
     session.parser.parse(seq)
     session
   end

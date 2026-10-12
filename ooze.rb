@@ -1,19 +1,22 @@
+require_relative "./ooze/patches/keyboard"
 require_relative "./ooze/terminal"
-require_relative "./ooze/patches/wrap_stream"
+require_relative "./ooze/ui"
+
+PLUGIN_PATH = ENV["OOZE_PLUGIN_PATH"] || "assets/plugins"
 
 module Ooze
-  module UI
+  def self.register_plugin(name, block)
+    if plugins[name]
+      puts "Ooze Plugin: #{name} is already registered"
+    else
+      plugins[name] = block
+    end
   end
-end
 
-a = {one: 2}
-a.transform_values! do |v|
-  v + 1
-end
-p a
-require_relative "./ooze/ui/session"
+  def self.plugins
+    @plugins ||= {}
+  end
 
-module Ooze
   class App < Hokusai::Block
     template <<-EOF
     [template]
@@ -29,6 +32,14 @@ module Ooze
         Hokusai::Color.convert(value)
       end
     end
+  end
+end
+
+Dir.glob("#{PLUGIN_PATH}/*").each do |dir|
+  if File.exist?("#{dir}/manifest.rb")
+    eval ruby_file("#{dir}/manifest.rb")
+  else
+    puts "Warning: Plugin #{dir} is not a Ooze plugin"
   end
 end
 
