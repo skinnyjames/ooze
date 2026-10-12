@@ -60,7 +60,7 @@ module Ooze
       attr_accessor :ambiguous_width
       attr_reader :pty, :parser, :input, :charset
 
-      PTY_BUFFER_SIZE = 4096
+      PTY_BUFFER_SIZE = 1024
 
       def initialize(pty)
         @pty = pty
@@ -87,9 +87,12 @@ module Ooze
         pty.io.write(content)
       end
 
-      def read(size = PTY_BUFFER_SIZE)
-        content = pty.io.sysread(size)
-        parser.parse(content.freeze)
+      def read(timeout = 0.01)
+        timer = Hokusai::Util::Timer.new
+        while !timer.elapsed(timeout)
+          content = pty.io.sysread(PTY_BUFFER_SIZE)
+          parser.parse(content.freeze)
+        end
       rescue Errno::EAGAIN, Errno::EWOULDBLOCK, Errno::EIO, EOFError
       end
 
@@ -399,7 +402,8 @@ module Ooze
       end
 
       def clear_alt_screen
-        @altscreen = Screen.new(self, pty.rows, pty.cols)
+        rows, cols = pty.size
+        @altscreen = Screen.new(self, rows, cols)
         @altscreen.skip_evict = true
       end
 

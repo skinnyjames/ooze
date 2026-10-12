@@ -129,6 +129,40 @@ module Ooze
       end
     end
 
+    # Public: Helper for sequences with placeholders
+    # 
+    # Examples
+    #   
+    #   seqp = SEQP["CSI ? m"]
+    #   seqp.complete(["4 ; 1"]) # => CSI 4 ; 1 m
+    #
+    #   cursor_up = SEQP["CSI ? ; ? H"]
+    #   cursor_up.complete(["5", "10"])
+    #  
+    class SEQP
+      def self.[](str)
+        tokens = str.split(" ").map { |token| token == "??" ? nil : SEQ[token] }
+        count = tokens.count(nil)
+        new(tokens, count)
+      end
+
+      attr_reader :count
+
+      def initialize(tokens, count)
+        @tokens = tokens
+        @count = count
+      end
+
+      def complete(sequences)
+        raise "Need #{@count} tokens to complete; got #{sequences.size}" if sequences.size != @count
+
+        i = -1
+        @tokens.flat_map do |token|
+          token.nil? ? SEQ[sequences[i += 1]] : token
+        end
+      end
+    end
+
     class SEQR
       def self.[](str)
         tokens = str.split(" ")
@@ -147,6 +181,15 @@ module Ooze
 
         raise "Should be a single value or range"
       end
+
+      def initialize(first, last)
+        @first = first
+        @last = last
+      end
+
+      def complete(str)
+        @first + SEQ[str] + @last
+      end
     end
 
     # Control Sequence Introducer
@@ -159,6 +202,10 @@ module Ooze
     # https://www.vt100.net/docs/vt220-rm/chapter4.html#F4-3
     # Moves the next graphic char from G3 (Graphics 3) into GL (ASCII charset) 
     SS3 = SEQ["esc O"].freeze
+
+    SP = SEQR["sp"].freeze
+    CR = SEQR["cr"].freeze
+    LF = SEQR["lf"].freeze
   end
 end
 

@@ -82,7 +82,7 @@ module Ooze
           white_bright: Colors::WHITE_BRIGHT,
         }.each_with_index do |(key, color), idx|
           if block_given?
-            palette[idx] = yield overrides[key] || color
+            palette[idx] = yield (overrides[key] || color)
           else
             palette[idx] = overrides[key] || color
           end
