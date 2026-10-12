@@ -363,14 +363,12 @@ module Ooze
         when nil
           case action.param_first
           when nil, 0
-            # send 
-            # SEQ["CSI ? 62 c"]
+            input.write SEQ["CSI ? 62 c"]
           end
         when '>'
           case action.param_first
           when nil, 0
-            # send
-            #SEQ["CSI > 1 ; 1 ; 0 c"]
+            input.write SEQ["CSI > 1 ; 1 ; 0 c"]
           end
         end
       end
@@ -379,11 +377,9 @@ module Ooze
         case action.param_first
         when 5
           # lol?
-          # send
-          # SEQ["CSI 0 n"]
+          input.write SEQ["CSI 0 n"]
         when 6
-          # send
-          # SEQ["CSI #{screen.cursor.row + 1} ; #{[screen.cursor.col, screen.cols - 1].min + 1} R"]
+          input.write SEQ["CSI #{screen.cursor.row + 1} ; #{[screen.cursor.col, screen.cols - 1].min + 1} R"]
         end
       end
 
@@ -397,8 +393,8 @@ module Ooze
         else
           ret = 0
         end
-        # send
-        # SEQ["CSI #{pc} #{param} ; #{ret} $ y"]
+ 
+        input.write SEQ["CSI #{pc} #{param} ; #{ret} $ y"]
       end
 
       def clear_alt_screen
