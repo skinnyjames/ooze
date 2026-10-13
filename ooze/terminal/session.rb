@@ -70,13 +70,13 @@ module Ooze
       end
 
       attr_accessor :ambiguous_width, :secret
-      attr_reader :pty, :parser, :input, :charset
+      attr_reader :pty, :parser, :input, :charset, :rows, :cols
 
       PTY_BUFFER_SIZE = 1024
 
       def initialize(pty, secret: nil)
         @pty = pty
-        rows, cols = pty.size
+        @rows, @cols = pty.size
   
         @parser = Parser.new(self)
         @input = Input.new(self)
