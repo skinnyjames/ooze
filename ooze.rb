@@ -1,6 +1,7 @@
 require_relative "./ooze/patches/keyboard"
 require_relative "./ooze/terminal"
 require_relative "./ooze/ui"
+require_relative "./patches/resolver"
 
 PLUGIN_PATH = ENV["OOZE_PLUGIN_PATH"] || "assets/plugins"
 
@@ -47,7 +48,7 @@ Hokusai::Backend.run(Ooze::App) do |config|
   config.title = "Ooze"
   config.width = 600
   config.height = 500
-  config.draw_fps = true
+  config.draw_fps = true if ENV["OOZE_DRAW_FPS"]
   config.after_load do
     Hokusai.fonts.register "default", Hokusai::Backend::Font.from_ext("assets/DejaVu.ttf", 30)
     Hokusai.fonts.activate "default"

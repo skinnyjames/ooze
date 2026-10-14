@@ -1,0 +1,73 @@
+name: test
+
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    container:
+      image: ubuntu:latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Checkout esctest2
+        uses: actions/checkout@v4
+        with:
+          repository: ThomasDickey/esctest2
+          path: esctest2
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Fetch hokusai-pocket ${{ env.HP_VERSION }}
+        uses: dsaltares/fetch-gh-release-asset@1.1.2
+        with:
+          repo: skinnyjames/hokusai-pocket
+          version: "tags/0.9.0"
+          file: hokusai-pocket-x86-linux.tar.gz
+          target: hokusai-pocket.tar.gz
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Unpack hokusai-pocket
+        run: tar -xf hokusai-pocket.tar.gz --strip-components 1 && chmod 755 hokusai-pocket
+
+      - name: Cache rebuilt hokusai-pocket
+        id: hp-cache
+        uses: actions/cache@v4
+        with:
+          path: bin/hokusai-pocket
+          key: hp-${{ runner.os }}-${{ env.HP_VERSION }}-${{ hashFiles('gems', 'deps/**/mrbgem.rake', 'deps/**/src/**') }}
+
+      - name: Install build deps
+        if: steps.hp-cache.outputs.cache-hit != 'true'
+        run: |
+          apt-get update
+          apt-get install -y build-essential git cmake bison ruby rake \
+            libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libgl1-mesa-dev \
+            wget automake libtool clang libasound2-dev libglu1-mesa-dev mesa-common-dev \
+            xorg-dev libc++-dev libc++abi-dev
+
+      - name: hokusai-pocket rebuild
+        if: steps.hp-cache.outputs.cache-hit != 'true'
+        run: ./hokusai-pocket @rebuild
+
+      - name: Run unit tests
+        run: ./bin/hokusai-pocket run:target=test/ooze.rb
+
+      - name: Run esctest
+        env:
+          ESCTEST_DIR: ${{ github.workspace }}/esctest2/esctest
+          ESCTEST_LOG: ${{ github.workspace }}/esctest.log
+        run: ./bin/hokusai-pocket run:target=test/esctest.rb
+
+      - name: Summary
+        if: always()
+        run: grep "tests passed" esctest.log || echo "no summary found"
+
+      - name: Upload log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: esctest-log
+          path: esctest.log

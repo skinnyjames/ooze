@@ -197,6 +197,8 @@ module Ooze
     # Using ASCII represenation instead of C1 set.
     CSI = SEQ["esc ["].freeze
     OSC = SEQ["esc ]"].freeze
+    DCS = SEQ["esc P"].freeze
+    ST =  SEQ["esc \\"].freeze
     
     # Single Shift G3
     # https://www.vt100.net/docs/vt220-rm/chapter4.html#F4-3

@@ -15,10 +15,9 @@ class Ooze::UI::Screen < Hokusai::Block
   inject :panel_height
 
   def cursor(canvas)
-    rows, cols = session.pty.size
     cursor = session.screen.cursor
 
-    x = canvas.x + [cursor.col, cols - 1].min * width
+    x = canvas.x + [cursor.col, screen.cols - 1].min * width
     y = canvas.y + cursor.row * size
   
     [x, y]
