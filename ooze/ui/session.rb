@@ -46,7 +46,7 @@ class Ooze::UI::Session < Hokusai::Block
       [if="plugin"]
         container { :block="plugin" }
       [else]
-        panel { @keypress="on_keypress" background="94,163,39"}
+        panel { @keypress="on_keypress" background="22,22,22"}
           screen { :width="width" :size="size"  }
   EOF
 

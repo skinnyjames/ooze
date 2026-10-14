@@ -3,3 +3,4 @@ vendor/
 platforms
 bin/
 .*.*.swp
+fail.log

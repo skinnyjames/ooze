@@ -17,7 +17,7 @@ class Ooze::UI::Screen < Hokusai::Block
   def cursor(canvas)
     cursor = session.screen.cursor
 
-    x = canvas.x + [cursor.col, session.cols - 1].min * width
+    x = canvas.x + [cursor.col, screen.cols - 1].min * width
     y = canvas.y + cursor.row * size
   
     [x, y]

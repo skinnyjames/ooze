@@ -70,13 +70,13 @@ module Ooze
       end
 
       attr_accessor :ambiguous_width, :secret
-      attr_reader :pty, :parser, :input, :charset, :rows, :cols
+      attr_reader :pty, :parser, :input, :charset
 
       PTY_BUFFER_SIZE = 1024
 
       def initialize(pty, secret: nil)
         @pty = pty
-        @rows, @cols = pty.size
+        rows, cols = pty.size
   
         @parser = Parser.new(self)
         @input = Input.new(self)
@@ -263,6 +263,8 @@ module Ooze
         # Reports
         when 'c' then report_attributes(action)
         when 'n' then report_status(action)
+        when 't' then report_window(action)
+        when 'y' then request_checksum(action)
         # Style and graphics
         when 'q' # https://vt100.net/docs/vt510-rm/DECSCUSR.html
           if action.intermediate_first&.chr == ' '
@@ -431,6 +433,13 @@ module Ooze
         end
       end
 
+      def report_window(action)
+        case action.param_first
+        when 18
+          input.write SEQ["CSI 8 ; #{screen.rows} ; #{screen.cols} t"]
+        end
+      end
+
       def request_mode(action)
         param = action.param_first
         pc = action.private_marker_chr
@@ -443,6 +452,34 @@ module Ooze
         end
  
         input.write SEQ["CSI #{pc} #{param} ; #{ret} $ y"]
+      end
+
+      # https://vt100.net/docs/vt510-rm/DECRQCRA.html
+      # Esctest relies on this
+      # Algorithim here: https://github.com/ThomasDickey/esctest2/blob/2798f12149a19c3295e9b4853ab2da4b2eff1b2b/esctest/escutil.py#L237-L307
+      def request_checksum(action)
+        return unless action.intermediate_first&.chr == '*'
+        pid, pp, top, left, bottom, right = action.params
+
+        bottom = screen.rows if bottom.nil? || bottom.zero?
+        right = screen.cols if right.nil? || right.zero?
+
+        # clamp and zero index
+        top = ensure_one(top) - 1
+        left = ensure_one(left) - 1
+        right = [screen.cols, right].min - 1
+        bottom = [screen.rows, bottom].min - 1        
+
+        sum = 0
+        (top..bottom).each do |row|
+          (left..right).each do |col|
+            cp = screen.lines[row].codepoints[col]
+            sum += (cp.nil? || cp == :continue) ? 0x20 : cp
+          end
+        end
+
+        checksum = format('%04X', -(sum) & 0xFFFF)
+        input.write DCS + SEQ["#{pid} ! ~"] + checksum.codepoints + ST
       end
 
       def clear_alt_screen

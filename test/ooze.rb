@@ -24,7 +24,6 @@ module Matchers
   end
 end
 
-
 require_relative "./helpers/session_helpers"
 
 module Oozey
@@ -35,7 +34,7 @@ module Oozey
       # load app code
       # load test code
       Dir.glob("test/**/*.rb") do |file|
-        next if file.include?("ooze.rb")
+        next if file.include?("ooze.rb") || file.include?("esctest.rb")
 
         eval File.read(file)
       end
@@ -55,18 +54,6 @@ module Oozey
     include Matchers
     include ::SessionHelpers
   end
-end
-
-def get_block_by_type(block, type)
-  return block if (block.node.ast.type == type) || (block.node.portal&.ast&.has_if_condition? && block.node.portal&.ast&.type == type)
-
-  block.children.each do |child|
-    if b = get_block_by_type(child, type)
-      return b
-    end
-  end
-
-  nil
 end
 
 eval ruby_file("ooze/terminal.rb")
