@@ -4,3 +4,5 @@ platforms
 bin/
 .*.*.swp
 fail.log
+build/
+.DS_Store

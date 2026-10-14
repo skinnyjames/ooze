@@ -1,6 +1,7 @@
 require_relative "./ooze/patches/keyboard"
 require_relative "./ooze/terminal"
 require_relative "./ooze/ui"
+require_relative "./patches/resolver"
 
 PLUGIN_PATH = ENV["OOZE_PLUGIN_PATH"] || "assets/plugins"
 
