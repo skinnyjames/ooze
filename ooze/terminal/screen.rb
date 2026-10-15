@@ -362,16 +362,28 @@ module Ooze
 
       # TODO: save / restore cursor
       # tabs
-      def tabgoto
+      def tabgoto(times = 1)
         stops = @tabstops.keys.sort
-      
-        stopped = nil
 
-        stopped = stops.find do |stop|
-          stop > cursor.col
+        times.times do
+          stopped = stops.find do |stop|
+            stop > cursor.col
+          end
+
+          cursor.col = stopped || cols - 1
         end
+      end
 
-        cursor.col = stopped || cols - 1
+      def tabback(times = 1)
+        stops = @tabstops.keys.sort
+
+        times.times do
+          stopped = stops.reverse.find do |stop|
+            stop < cursor.col
+          end
+
+          cursor.col = stopped || 0
+        end
       end
 
       def tabset

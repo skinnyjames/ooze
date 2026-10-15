@@ -253,6 +253,8 @@ module Ooze
           screen.cursor.col = 0
         when 'r' then screen.set_margins(action.params[0] || 0, action.params[1])
         when 'g' then screen.tabclear(action.params[0] == 3)
+        when 'I' then screen.tabgoto(ensure_one(action.params[0]))
+        when 'Z' then screen.tabback(ensure_one(action.params[0]))
         when 'm' then screen.sgr(action.params)
         # Editing
         when 'L' then screen.line_insert(ensure_one(action.params[0]))
