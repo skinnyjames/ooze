@@ -314,8 +314,16 @@ module Ooze
         @on_evicted&.call(runs)
         scrollback.concat runs
       end
-      
+
       def set_cursor(row, col)
+        return set_cursor!(row, col) unless session.modes[:decom]
+
+        cursor.row = [row, margin_bottom].min
+        cursor.row = [cursor.row, margin_top].max
+        cursor.col = [col, cols - 1].min 
+      end
+      
+      def set_cursor!(row, col)
         cursor.row = [row, rows - 1].min
         cursor.col = [col, cols - 1].min 
       end

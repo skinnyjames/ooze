@@ -234,15 +234,19 @@ module Ooze
         # Cursor positioning: 4.7
         when 'A' then screen.cursor_up(ensure_one(action.params[0]))
         when 'B' then screen.cursor_down(ensure_one(action.params[0]))
-        when 'C' then screen.cursor_forward(ensure_one(action.params[0]))
+        when 'C', 'a' then screen.cursor_forward(ensure_one(action.params[0]))
         when 'D' then screen.cursor_backward(ensure_one(action.params[0]))
+        # https://vt100.net/docs/vt510-rm/VPR.html
+        when 'e' then screen.set_cursor!(screen.cursor.row + ensure_one(action.params[0]), screen.cursor.col)
         # https://vt100.net/docs/vt510-rm/CHA.html
-        when 'G' then screen.set_cursor(screen.cursor.row, ensure_one(action.params[0]) - 1)
+        when 'G' then screen.set_cursor!(screen.cursor.row, ensure_one(action.params[0]) - 1)
         # https://vt100.net/docs/vt510-rm/CUP.html
         # CUP is 1 indexed, so we need to subtract for our screen cursor, which is 0 indexed.
         when 'H', 'f' then screen.set_cursor(ensure_one(action.params[0]) - 1, ensure_one(action.params[1]) - 1)
         # https://vt100.net/docs/vt510-rm/VPA.html
-        when 'd' then screen.set_cursor(ensure_one(action.params[0]) - 1, screen.cursor.col)
+        when 'd' then screen.set_cursor!(ensure_one(action.params[0]) - 1, screen.cursor.col)
+        # https://vt100.net/docs/vt510-rm/HPA.html
+        when '`' then screen.set_cursor!(screen.cursor.row, ensure_one(action.params[0]) - 1)
         when 'S' then screen.scroll_up(action.params[0] || 1)
         when 'T' then screen.scroll_down(action.params[0] || 1)
         when 'E'
