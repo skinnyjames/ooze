@@ -31,6 +31,9 @@ module Ooze
       # DECTCEM (Text cursor enable)
       # DECKPAM (Keypad Application mode) / DECKPNM (Keypad Numeric mode)
       # DECNRCM (Character set)
+      # 
+      # Xterm specific things
+      # XTREVWRAP (Reverse Wrap) # https://github.com/ThomasDickey/esctest2/blob/master/esctest/tests/bs.py#L174
       def modes
         @modes ||= modes_initial
       end
@@ -44,6 +47,7 @@ module Ooze
           decpex: false, dectcem: true, deckpam: false,
           decnrcm: false, altscreen: false, bracketpaste: false,
           focusevents: false,
+          xtrevwrap: false,
         }
       end
 
@@ -65,7 +69,8 @@ module Ooze
           8 => :decarm, 18 => :decpff, 19 => :decpex, 
           25 => :dectcem, 42 => :decnrcm, 1049 => :altscreen,
           47 => :altscreen, 1047 => :altscreen , 2004 => :bracketpaste,
-          1004 => :focusevents, 
+          1004 => :focusevents,
+          45 => :xtrevwrap
         }
       end
 
@@ -402,6 +407,8 @@ module Ooze
         @modes[:decckm] = false
         @modes[:kam] = false
         @modes[:dectcem] = true
+        @modes[:xtrevwrap] = false
+        screen.set_margins(0, nil)
         screen.reset_style
         screen.cursor.row = 0
         screen.cursor.col = 0

@@ -494,6 +494,10 @@ module Ooze
           range.each do |i|
             line.blank(i, @default_style_id, blank_nil: true)
           end
+
+          if mode == 0 || mode == 2
+            line.wrapped = false
+          end
         end
       end
 
@@ -579,11 +583,32 @@ module Ooze
 
       # Public: Moves the cursor left (count) columns. 
       #         The cursor stops at the left margin.
+      #         Note: if autowrap + reverse wrap is set, the cursor will 
+      #         backward traverse soft wrapped lines
       #
       # count - the columns to move backward
       def cursor_backward(count)
-        new_col = [cursor.col, cols - 1].min - count
-        cursor.col = new_col.negative? ? 0 : new_col
+        reverse_wrap = session.modes[:decawm] && session.modes[:xtrevwrap]
+
+        count -= 1 if cursor.col >= cols && reverse_wrap
+        cursor.col = [cursor.col, cols - 1].min   # leave pending-wrap position
+
+        count.times do
+          # move up and back if wrapped and reverse wrap is on
+          if cursor.col.zero? && reverse_wrap
+            prev_row = cursor.row - 1
+            if prev_row >= margin_top && lines[prev_row]&.wrapped 
+              cursor.row = prev_row
+              cursor.col = cols - 1
+            else
+              break
+            end
+          elsif cursor.col > 0
+            cursor.col -= 1
+          else
+            break
+          end
+        end
       end
 
       # TODO: UTF-8 Needs to handle grapheme breaks.
