@@ -31,9 +31,16 @@ module Ooze
       # DECTCEM (Text cursor enable)
       # DECKPAM (Keypad Application mode) / DECKPNM (Keypad Numeric mode)
       # DECNRCM (Character set)
+      # 
+      # Xterm specific things
+      # XTREVWRAP (Reverse Wrap) # https://github.com/ThomasDickey/esctest2/blob/master/esctest/tests/bs.py#L174
       def modes
         @modes ||= modes_initial
       end
+
+      # https://vt100.net/docs/vt510-rm/DECRQM.html
+      PERMANENTLY_RESET_ANSI_MODES = [1, 5, 7, 10, 11, 13, 14, 15, 16, 17, 18, 19]
+      PERMANENTLY_RESET_DEC_MODES = [60]
 
       def modes_initial
         {
@@ -44,6 +51,7 @@ module Ooze
           decpex: false, dectcem: true, deckpam: false,
           decnrcm: false, altscreen: false, bracketpaste: false,
           focusevents: false,
+          xtrevwrap: false,
         }
       end
 
@@ -64,8 +72,9 @@ module Ooze
           5 => :decscnm, 6 => :decom, 7 => :decawm, 
           8 => :decarm, 18 => :decpff, 19 => :decpex, 
           25 => :dectcem, 42 => :decnrcm, 1049 => :altscreen,
-          47 => :altscreen, 1047 => :altscreen , 2004 => :bracketpaste,
-          1004 => :focusevents, 
+          47 => :altscreen, 66 => :deckpam, 1047 => :altscreen , 
+          2004 => :bracketpaste, 1004 => :focusevents,
+          45 => :xtrevwrap
         }
       end
 
@@ -185,6 +194,9 @@ module Ooze
         when '#'
           case action.chr
           when '8' # 4.19 Tests and Adjustments (DECTST and DECALN)
+            screen.alignment
+            screen.set_margins(0, nil)
+            screen.set_cursor!(0, 0)
           when '3' # 4.10.1 Double Height Line (DECDHL)
           when '4' # 
           when '5' # 4.10.2 Single-Width Line (DECSWL)
@@ -202,15 +214,8 @@ module Ooze
           when 'D' then screen.index
           when 'M' then screen.reverse_index
           when 'E' then screen.next_line
-          when '7' # Save cursor (DECSC)
-            @saved_cursor = Cursor.new
-            @saved_cursor.row = screen.cursor.row
-            @saved_cursor.col = screen.cursor.col
-          when '8' # Restore cursor (DECRC)
-            if @saved_cursor
-              screen.cursor.row = @saved_cursor.row
-              screen.cursor.col = @saved_cursor.col
-            end
+          when '7' then save_cursor 
+          when '8' then restore_cursor
           when 'H' then screen.tabset
           when '=' then modes[:deckpam] = true
           when '>' then modes[:deckpam] = false
@@ -226,18 +231,23 @@ module Ooze
         # Terminal modes: https://www.vt100.net/docs/vt220-rm/chapter4.html#T4-6
         when 'h' then set_mode(action)
         when 'l' then reset_mode(action)
+        when 'b' then screen.repeat_last_char(ensure_one(action.params[0]))
         # Cursor positioning: 4.7
         when 'A' then screen.cursor_up(ensure_one(action.params[0]))
         when 'B' then screen.cursor_down(ensure_one(action.params[0]))
-        when 'C' then screen.cursor_forward(ensure_one(action.params[0]))
+        when 'C', 'a' then screen.cursor_forward(ensure_one(action.params[0]))
         when 'D' then screen.cursor_backward(ensure_one(action.params[0]))
+        # https://vt100.net/docs/vt510-rm/VPR.html
+        when 'e' then screen.set_cursor!(screen.cursor.row + ensure_one(action.params[0]), screen.cursor.col)
         # https://vt100.net/docs/vt510-rm/CHA.html
-        when 'G' then screen.set_cursor(screen.cursor.row, ensure_one(action.params[0]) - 1)
+        when 'G' then screen.set_cursor!(screen.cursor.row, ensure_one(action.params[0]) - 1)
         # https://vt100.net/docs/vt510-rm/CUP.html
         # CUP is 1 indexed, so we need to subtract for our screen cursor, which is 0 indexed.
         when 'H', 'f' then screen.set_cursor(ensure_one(action.params[0]) - 1, ensure_one(action.params[1]) - 1)
         # https://vt100.net/docs/vt510-rm/VPA.html
-        when 'd' then screen.set_cursor(ensure_one(action.params[0]) - 1, screen.cursor.col)
+        when 'd' then screen.set_cursor!(ensure_one(action.params[0]) - 1, screen.cursor.col)
+        # https://vt100.net/docs/vt510-rm/HPA.html
+        when '`' then screen.set_cursor!(screen.cursor.row, ensure_one(action.params[0]) - 1)
         when 'S' then screen.scroll_up(action.params[0] || 1)
         when 'T' then screen.scroll_down(action.params[0] || 1)
         when 'E'
@@ -248,6 +258,8 @@ module Ooze
           screen.cursor.col = 0
         when 'r' then screen.set_margins(action.params[0] || 0, action.params[1])
         when 'g' then screen.tabclear(action.params[0] == 3)
+        when 'I' then screen.tabgoto(ensure_one(action.params[0]))
+        when 'Z' then screen.tabback(ensure_one(action.params[0]))
         when 'm' then screen.sgr(action.params)
         # Editing
         when 'L' then screen.line_insert(ensure_one(action.params[0]))
@@ -260,6 +272,9 @@ module Ooze
         when 'J' then screen.erase_in_display(action.params[0] || 0, selective: action.private_marker_chr == '?')
         # Printing (ignore for now)
         when 'i' then nil
+        # save restore cursor
+        when 's' then save_cursor if action.private_marker_chr.nil?
+        when 'u' then restore_cursor if action.private_marker_chr.nil?
         # Reports
         when 'c' then report_attributes(action)
         when 'n' then report_status(action)
@@ -390,21 +405,26 @@ module Ooze
         @modes = modes_initial
         scrollback = @screen.scrollback.dup
         rows, cols = pty.size
+        @saved_cursors = {}
         @screen = Screen.new(self, rows, cols)
         @screen.scrollback = scrollback
+        clear_alt_screen
         @parser.reset
         @charset = :ascii
       end
 
+      # https://vt100.net/docs/vt510-rm/DECSTR.html
       def soft_reset(action)
         @modes[:irm] = false
         @modes[:decom] = false
         @modes[:decckm] = false
         @modes[:kam] = false
         @modes[:dectcem] = true
+        @modes[:xtrevwrap] = false
+        screen.reset_margins
         screen.reset_style
-        screen.cursor.row = 0
-        screen.cursor.col = 0
+
+        @saved_cursors = { true => { row: 0, col: 0, origin_mode: false }, false => { row: 0, col: 0, origin_mode: false } }
         @charset = :ascii
       end
 
@@ -444,9 +464,12 @@ module Ooze
         param = action.param_first
         pc = action.private_marker_chr
         modemap = pc == '?' ? dec_modemap : ansi_modemap
-    
+        reset = pc == '?' ? PERMANENTLY_RESET_DEC_MODES : PERMANENTLY_RESET_ANSI_MODES
+
         if mode = modemap[param]
           ret = modes[mode] ? 1 : 2
+        elsif reset.include?(param)
+          ret = 4
         else
           ret = 0
         end
@@ -486,6 +509,7 @@ module Ooze
         rows, cols = pty.size
         @altscreen = Screen.new(self, rows, cols)
         @altscreen.skip_evict = true
+        @saved_cursors&.delete(true)
       end
 
       def prepare_alt_screen
@@ -497,6 +521,22 @@ module Ooze
       
       def on_plugin(&block)
         @on_plugin = block
+      end
+
+      def save_cursor
+        @saved_cursors ||= {}
+        @saved_cursors[modes[:altscreen]] = { row: screen.cursor.row, col: screen.cursor.col, origin_mode: modes[:decom] }
+      end
+
+      def restore_cursor
+        @saved_cursors ||= {}
+        unless data = @saved_cursors[modes[:altscreen]]
+          return
+        end
+
+        screen.cursor.row = data[:row]
+        screen.cursor.col = data[:col]
+        modes[:decom] = data[:origin_mode]
       end
 
       private

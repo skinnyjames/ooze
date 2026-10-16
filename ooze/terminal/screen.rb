@@ -167,7 +167,7 @@ module Ooze
                     :current_line_width, :cursor, :scrollback, :skip_evict
 
       attr_reader :session, :rows, :cols, :cursor, :styles, :stylemap, :lines, :current_style,
-                  :tabstops
+                  :tabstops, :default_style_id
 
       def initialize(session, rows, cols)
         @session = session
@@ -196,6 +196,15 @@ module Ooze
         @default_style_id = @current_style_id
 
         setup_tabstops
+      end
+
+      def alignment
+        @lines = Array.new(rows) do
+          line = Line.new(cols)
+          line.codepoints = ['E'.ord] * cols
+          line.attrs = [default_style_id] * cols
+          line 
+        end
       end
 
       def on_evicted(&block)
@@ -314,8 +323,15 @@ module Ooze
         @on_evicted&.call(runs)
         scrollback.concat runs
       end
-      
+
       def set_cursor(row, col)
+        return set_cursor!(row, col) unless session.modes[:decom]
+
+        cursor.row = [[row + margin_top, margin_bottom].min, margin_top].max
+        cursor.col = [col, cols - 1].min 
+      end
+      
+      def set_cursor!(row, col)
         cursor.row = [row, rows - 1].min
         cursor.col = [col, cols - 1].min 
       end
@@ -362,16 +378,28 @@ module Ooze
 
       # TODO: save / restore cursor
       # tabs
-      def tabgoto
+      def tabgoto(times = 1)
         stops = @tabstops.keys.sort
-      
-        stopped = nil
 
-        stopped = stops.find do |stop|
-          stop > cursor.col
+        times.times do
+          stopped = stops.find do |stop|
+            stop > cursor.col
+          end
+
+          cursor.col = stopped || cols - 1
         end
+      end
 
-        cursor.col = stopped || cols - 1
+      def tabback(times = 1)
+        stops = @tabstops.keys.sort
+
+        times.times do
+          stopped = stops.reverse.find do |stop|
+            stop < cursor.col
+          end
+
+          cursor.col = stopped || 0
+        end
       end
 
       def tabset
@@ -391,6 +419,13 @@ module Ooze
       # 4.10 Line Attributes
       # No-Op for now, how dumb.
 
+      def repeat_last_char(count)
+        return unless @last_codepoint
+
+        count.times do 
+          print(@last_codepoint)
+        end
+      end
 
       # Public: Inserts (count) lines at the cursor. 
       #        If fewer than (count) lines remain from the current line to the end of the scrolling region, 
@@ -403,6 +438,8 @@ module Ooze
       #
       # Returns nothing
       def line_insert(count)
+        return if cursor.row > margin_bottom || cursor.row < margin_top
+
         count = (margin_bottom + 1) - cursor.row > count ? count : (margin_bottom + 1) - cursor.row
 
         # insert the lines
@@ -430,6 +467,8 @@ module Ooze
       #
       # Returns nothing
       def line_delete(count)
+        return if cursor.row > margin_bottom || cursor.row < margin_top
+
         count = (margin_bottom + 1) - cursor.row > count ? count : (margin_bottom + 1) - cursor.row
 
         lines[cursor.row, count] = []
@@ -442,6 +481,8 @@ module Ooze
       end
 
       def insert_chars(count)
+        return if cursor.row > margin_bottom || cursor.row < margin_top
+
         count = 1 if count.zero?
 
         count.times do
@@ -494,6 +535,10 @@ module Ooze
           range.each do |i|
             line.blank(i, @default_style_id, blank_nil: true)
           end
+
+          if mode == 0 || mode == 2
+            line.wrapped = false
+          end
         end
       end
 
@@ -521,6 +566,11 @@ module Ooze
         erase_in_line(mode)
       end
 
+      def reset_margins
+        self.margin_top = 0
+        self.margin_bottom = rows - 1
+      end
+
       # 4.13 Scrolling margins
       def set_margins(top, bottom)
         t = top
@@ -545,8 +595,9 @@ module Ooze
       #
       # count - the rows to move up
       def cursor_up(count)
+        top = cursor.row >= margin_top ? margin_top : 0
         new_row = cursor.row - count 
-        cursor.row = new_row.negative? ? 0 : new_row
+        cursor.row = [top, new_row].max
       end
 
       # Public: Moves the cursor down (count) lines in the same column. 
@@ -554,8 +605,9 @@ module Ooze
       #
       # count - the rows to move down
       def cursor_down(count)
+        bottom = cursor.row <= margin_bottom ? margin_bottom : rows - 1
         new_row = cursor.row + count 
-        cursor.row = [new_row, rows - 1].min
+        cursor.row = [new_row, bottom].min
       end
       # Public: Moves the cursor right (count) columns. 
       #         The cursor stops at the right margin.
@@ -579,17 +631,39 @@ module Ooze
 
       # Public: Moves the cursor left (count) columns. 
       #         The cursor stops at the left margin.
+      #         Note: if autowrap + reverse wrap is set, the cursor will 
+      #         backward traverse soft wrapped lines
       #
       # count - the columns to move backward
       def cursor_backward(count)
-        new_col = [cursor.col, cols - 1].min - count
-        cursor.col = new_col.negative? ? 0 : new_col
+        reverse_wrap = session.modes[:decawm] && session.modes[:xtrevwrap]
+
+        count -= 1 if cursor.col >= cols && reverse_wrap
+        cursor.col = [cursor.col, cols - 1].min   # leave pending-wrap position
+
+        count.times do
+          # move up and back if wrapped and reverse wrap is on
+          if cursor.col.zero? && reverse_wrap
+            prev_row = cursor.row - 1
+            if prev_row >= margin_top && lines[prev_row]&.wrapped 
+              cursor.row = prev_row
+              cursor.col = cols - 1
+            else
+              break
+            end
+          elsif cursor.col > 0
+            cursor.col -= 1
+          else
+            break
+          end
+        end
       end
 
       # TODO: UTF-8 Needs to handle grapheme breaks.
       #       The parser can emit ZWJ or other (control) chars.
       #       ref: deps/mruby-utf8proc/src/utf8proc.h#644
       def print(codepoint)
+        @last_codepoint = codepoint
         width = session.width(codepoint)
 
         # wrap pending and autowrap is on, move the cursor down

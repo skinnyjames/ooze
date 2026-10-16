@@ -9,7 +9,7 @@ class SpecTest
     dir = ENV["ESCTEST_DIR"] || "../esctest2/esctest"
     log = ENV["ESCTEST_LOG"] || "../../ooze/fail.log"
     session = Ooze::Terminal::Session.spawn(24, 80)
-    session.write "cd #{dir} && python3 esctest.py --expected-terminal=xterm --logfile=#{log}; exit\r"
+    session.write "cd #{dir} && python3 esctest.py --xterm-reverse-wrap=383 --expected-terminal=xterm --logfile=#{log}; exit\r"
   
     until session.pty.exited?
       session.read
