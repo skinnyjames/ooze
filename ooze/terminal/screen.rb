@@ -31,6 +31,13 @@ module Ooze
       # Public: Replaces a char at (col). 
       #         Replace mode adds characters by replacing the character at the cursor position.
       def replace(col, codepoint, attr, charw: codepoint.charwidth(1))
+        if charw == 1 && widths[col] == 1 && codepoints[col] != :continue
+          codepoints[col] = codepoint
+          attrs[col] = attr
+  
+          return
+        end
+
         blank(col, attr)
 
         # if a wide char, fill in more cols
