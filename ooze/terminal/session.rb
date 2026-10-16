@@ -121,7 +121,7 @@ module Ooze
       end
 
       def width(codepoint)
-        codepoint.charwidth(ambiguous_width)
+        codepoint < ASCII_CODE_TABLE[:del] ? 1 : codepoint.charwidth(ambiguous_width)
       end
 
       def on_bell(&block)
@@ -161,21 +161,21 @@ module Ooze
       # 4.2 Control Characters
       def on_execute(action)
         case action.codepoint
-        when SEQR["enq"]
-        when SEQR["cr"] then screen.cursor.col = 0
-        when SEQR["bel"] then ring
-        when SEQR["bs"] then screen.cursor_backward(1)
-        when SEQR["ht"] then screen.tabgoto
-        when SEQR["lf"], SEQR["vt"], SEQR["ff"]
+        when ASCII_CODE_TABLE[:enq]
+        when ASCII_CODE_TABLE[:cr] then screen.cursor.col = 0
+        when ASCII_CODE_TABLE[:bel] then ring
+        when ASCII_CODE_TABLE[:bs] then screen.cursor_backward(1)
+        when ASCII_CODE_TABLE[:ht] then screen.tabgoto
+        when ASCII_CODE_TABLE[:lf], ASCII_CODE_TABLE[:vt], ASCII_CODE_TABLE[:ff]
           modes[:lnm] ? screen.next_line : screen.index
-        when SEQR["dc1"]
-        when SEQR["dc2"]
-        when SEQR["so"]
+        when ASCII_CODE_TABLE[:dc1]
+        when ASCII_CODE_TABLE[:dc2]
+        when ASCII_CODE_TABLE[:so]
           # Invokes G1 character set into GL. G1 is designated by a select-character-set (SCS) sequence.
-        when SEQR["si"]
+        when ASCII_CODE_TABLE[:si]
           # Invoke G0 character set into GL. G0 is designated by a select-character-set sequence (SCS).
-        when SEQR["can"] # canceled
-        when SEQR["sub"]
+        when ASCII_CODE_TABLE[:can] # canceled
+        when ASCII_CODE_TABLE[:sub]
           screen.print(SEQR["?"])
         end
       end
