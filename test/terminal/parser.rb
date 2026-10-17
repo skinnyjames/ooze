@@ -30,14 +30,14 @@ class ParserTest < Oozey::Test
     expect(tokens.size).to be(1)
   end
 
-  test "Ground GL print" do
-    tokens = parse("Ooze") do |action, i|
-      expect(action.type).to eql(:print)
-      expected = { 0 => "O", 1 => "o", 2 => "z", 3 => "e" }[i]
-      expect(action.content).to eql(expected)
-    end
+  test "Ground GL print takes the fast path" do
+    printed = []
+    session.define_singleton_method(:print) { |cp| printed << cp }
+    session.parser.parse("abc".freeze)
+    expect(printed).to eql("abc".codepoints)
 
-    expect(tokens.size).to be(4)
+    tokens = parse("Ooze")
+    expect(tokens.size).to be(0)
   end
 
   # Unicode checks
@@ -79,12 +79,10 @@ class ParserTest < Oozey::Test
   end
 
   test "Unicode codepoints at and > GR should print" do
-    tokens = parse("中é\u00A0") do |action, i|
-      expected = { 0 => "中", 1 => "é", 2 => "\u00A0" }[i]
-      expect(action.type).to eql(:print)
-      expect(action.content).to eql(expected)
-    end
-    expect(tokens.size).to eql(3)
+    printed = []
+    session.define_singleton_method(:print) { |cp| printed << cp }
+    session.parser.parse("中é\u00A0".freeze)
+    expect(printed).to eql("中é\u00A0".codepoints)
   end
 
   test "Terminal modes come froim csi_dispatch actions" do

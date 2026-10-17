@@ -4,6 +4,9 @@ module Ooze
     #         Based on prior art and implemented to support UTF-8
     #         https://github.com/coezbek/vtparser
     #         https://www.vt100.net/emu/dec_ansi_parser
+    #         
+    #         Optimizations:
+    #           * printing ASCII in :ground state will skip action dispatch and call session.print directly
     class Parser
       # Public: A Parser action
       #         yielded to the callback provided by 
@@ -25,6 +28,8 @@ module Ooze
           params[0]
         end
       end
+
+      ASCII_RANGE = 0x20..0x7E
 
       attr_reader :intermediates, :params, :state
 
@@ -190,6 +195,13 @@ module Ooze
       # Returns nothing
       def parse(str)
         str.codepoints_each do |codepoint|
+          # Optimization: ASCII Fast path
+          if @state == :ground && ASCII_RANGE.include?(codepoint)
+            @session.print(codepoint)
+            
+            next
+          end
+          
           if codepoint >= 160
             case state
             when :ground
@@ -203,10 +215,10 @@ module Ooze
             next
           end
 
-          action, new_state = STATES[state][codepoint]
-          new_state ||= state
+          action, new_state = STATES[@state][codepoint]
+          new_state ||= @state
 
-          if state != new_state
+          if @state != new_state
             handle_action(ON_EXIT[state], codepoint) if ON_EXIT[state]
             handle_action(action, codepoint)
             handle_action(ON_ENTRY[new_state], codepoint) if ON_ENTRY[new_state]
@@ -222,6 +234,9 @@ module Ooze
 
       def handle_action(action, codepoint)
         case action
+        when :print
+          @session.print(codepoint)
+          return
         when :private_marker
           @private_marker = codepoint
         when :collect
@@ -256,8 +271,6 @@ module Ooze
             @buffer << codepoint.chr("UTF-8")
 
             return
-          when :print
-            @buffer = codepoint.chr("UTF-8")
           when :execute
             if codepoint == SEQR["can"] || codepoint == SEQR["sub"]
               @private_marker = nil
@@ -269,7 +282,7 @@ module Ooze
           end
 
           @on_parse&.call(Action.new(action, codepoint, @intermediates, @params, @buffer, @private_marker))
-
+          
           case action
           when :osc_dispatch, :unhook
             @buffer = ""

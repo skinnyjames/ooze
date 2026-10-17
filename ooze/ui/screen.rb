@@ -27,7 +27,22 @@ class Ooze::UI::Screen < Hokusai::Block
     session.screen
   end
 
+  def dirty?
+    session.screen.lines.any?(&:dirty)
+  end
+
   def render(canvas)
+    @command_cache ||= []
+
+    unless dirty?
+      node.meta.commands.queue.concat  @command_cache
+      yield canvas
+
+      return
+    end
+
+    @command_cache.clear
+
     node.meta.set_prop(:height, panel_height)
     x = canvas.x
     y = canvas.y
@@ -45,6 +60,8 @@ class Ooze::UI::Screen < Hokusai::Block
         text(content, x, y) do |command|
           command.color = style.foreground(palette) || color
           command.size = size
+
+          @command_cache << command
         end
 
         # handle wide chars
@@ -53,6 +70,8 @@ class Ooze::UI::Screen < Hokusai::Block
         if style.underline
           rect(x, y + size, content_width, 1.0) do |command|
             command.color = Hokusai::Color.new(222,22,22)
+
+            @command_cache << command
           end
         end
 
@@ -64,6 +83,8 @@ class Ooze::UI::Screen < Hokusai::Block
       cx, cy = cursor(canvas)
       rect(cx, cy, 1.0, size) do |command|
         command.color = Hokusai::Color.new(222, 22, 22)
+        
+        @command_cache << command
       end
     end
   end
