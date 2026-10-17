@@ -104,6 +104,10 @@ module Ooze
         @on_window_title = nil
         @on_clipboard = nil
 
+        @inbox = ""
+        @inbox_pos = 0
+        @inbox_max = 4 * 1024 * 1024
+
         setup_on_parse
       end
 
@@ -116,23 +120,48 @@ module Ooze
         pty.io.write(content)
       end
 
-      # Public: Reads from the pty for (timeout) seconds
+      # Public: Reads from the pty for (timeout) seconds until inbox is at @inbox_max
       #         Returns early if nothing is available to be read
       # 
       # timeout - seconds to read from pty (Float)
+      # budget - number of bytes to parse after draining the pty 
       # 
       # Returns number of bytes read (Integer)
-      def read(timeout = 0.01)
+      def read(timeout = 0.01, budget = 64 * 1024)
         timer = Hokusai::Util::Timer.new
         size = 0
-        while !timer.elapsed(timeout)
-          content = pty.io.sysread(PTY_BUFFER_SIZE)
-          parser.parse(content.freeze)
-          size += content.bytesize
+        begin
+          while !inbox_at_capacity? && !timer.elapsed(timeout)
+            message = pty.io.sysread(PTY_BUFFER_SIZE)
+            size += message.bytesize
+            @inbox << message
+          end
+  
+          size
+        rescue Errno::EAGAIN, Errno::EWOULDBLOCK, Errno::EIO, EOFError
+          size
         end
+
+        if inbox_capacity > 0
+          cap = inbox_capacity < budget ? inbox_capacity : budget
+          parser.parse(@inbox.byteslice(@inbox_pos, cap).freeze)
+          @inbox_pos += cap
+
+          if @inbox_pos == @inbox.bytesize
+            @inbox = ""
+            @inbox_pos = 0
+          end
+        end
+
         size
-      rescue Errno::EAGAIN, Errno::EWOULDBLOCK, Errno::EIO, EOFError
-        size
+      end
+
+      def inbox_at_capacity?
+        inbox_capacity >= @inbox_max
+      end
+
+      def inbox_capacity
+        @inbox.bytesize - @inbox_pos
       end
 
       # Public: Reads available bytes from pty
