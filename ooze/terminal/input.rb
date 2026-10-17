@@ -105,7 +105,7 @@ module Ooze
       end
 
       def write(seq)
-        session.write seq.pack("U*")
+        @session.write seq.pack("U*")
       end
 
       def keypress(key, modifiers)
@@ -166,14 +166,14 @@ module Ooze
       def paste(text)
         seq = text.codepoints.reject { |cp| cp == ASCII_CODE_TABLE[:esc] }
 
-        if session.modes[:bracketpaste]
+        if @session.modes[:bracketpaste]
           seq = SEQ["CSI 2 0 0 ~"] + seq + SEQ["CSI 2 0 1 ~"]
         end
         write seq
       end
 
       def focused(value = true)
-        return unless session.modes[:focusevents]
+        return unless @session.modes[:focusevents]
 
         write SEQ[value ? "CSI I" : "CSI O"]
       end

@@ -107,39 +107,117 @@ module Ooze
         setup_on_parse
       end
 
+      # Public: Writes (content) directly to the PTY
+      # 
+      # content - content to write (UTF-8 encoded String)
+      # 
+      # Returns nothing
       def write(content)
         pty.io.write(content)
       end
 
+      # Public: Reads from the pty for (timeout) seconds
+      #         Returns early if nothing is available to be read
+      # 
+      # timeout - seconds to read from pty (Float)
+      # 
+      # Returns number of bytes read (Integer)
       def read(timeout = 0.01)
         timer = Hokusai::Util::Timer.new
+        size = 0
         while !timer.elapsed(timeout)
           content = pty.io.sysread(PTY_BUFFER_SIZE)
           parser.parse(content.freeze)
+          size += content.bytesize
         end
+        size
       rescue Errno::EAGAIN, Errno::EWOULDBLOCK, Errno::EIO, EOFError
+        size
       end
 
+      # Public: Reads available bytes from pty
+      # 
+      # timeout - seconds to read from pty (Float)
+      # 
+      # Returns number of bytes read (Integer)
+      def read_soon(timeout)
+        if IO.select([pty.io], nil, nil, timeout)
+          read
+        else
+          0
+        end
+      end
+
+      # Public: Returns the width of a given (codepoint)
+      #         Includes a fast path for ascii
+      # 
+      # codepoint - codepoint (Integer)
+      # 
+      # Returns width (Integer)
       def width(codepoint)
         codepoint < ASCII_CODE_TABLE[:del] ? 1 : codepoint.charwidth(ambiguous_width)
       end
 
+      # Public: Sets the bel sequence callback
+      # 
+      # block - a callback to call on bel
+      # 
+      # Returns nothing
       def on_bell(&block)
         @on_bell = block
       end
 
+      # Public: Sets the OSC window title callback
+      # 
+      # block - callback that will be called with the new window title
+      # 
+      # Returns nothing
       def on_window_title(&block)
         @on_window_title = block
       end
       
+      # Public: Callback that is called with the clipboard text
+      # 
+      # block - callback
+      # 
+      # Returns nothing
       def on_clipboard(&block)
         @on_clipboard = block
       end
 
+      # Public: Triggers bell callback
+      # 
+      # Returns nothing
       def ring
         @on_bell&.call
       end
 
+      # Public: Sets the callback for Ooze specific OSC plugin sequence,
+      #         See: assets/shell/oz
+      # 
+      # block - the plugin callback
+      # 
+      # Examples
+      # 
+      #   session.on_plugin do |command, id, plugin_name, current_directory, on_reply, on_cancel|
+      #     case command
+      #     when :start   # called on plugin initialize
+      #     when :data    # called on data being piped to the script
+      #     when :done    # called on no more data
+      #     when :closed  # called when plugin is closed (returns a reply or cancels)
+      #     when :cancel  # called when command is canceled
+      #     when :error   # reserved for shell errors (unused)
+      #     end
+      #   end
+      #
+      # Returns nothing
+      def on_plugin(&block)
+        @on_plugin = block
+      end
+
+      # Public: Returns currently active screen
+      # 
+      # Returns Ooze::Terminal::Screen
       def screen
         modes[:altscreen] ? @altscreen : @screen
       end
@@ -148,7 +226,8 @@ module Ooze
         parser.on_parse do |action|
           case action.type
           when :execute then on_execute(action)
-          when :print then on_print(action)
+          # when :print then on_print(action)
+          # when :print_aggregate then on_print_aggregate(action)
           when :csi_dispatch then on_csi_dispatch(action)
           when :dcs_passthrough then on_dcs_passthrough(action)
           when :escape_dispatch then on_escape(action)
@@ -180,15 +259,18 @@ module Ooze
         end
       end
 
-      def on_print(action)
-        case parser.state
-        when :ground
-          screen.print(SEQ.with_charset(action.codepoint, @charset))
-        end
+      # Public: Prints a codepoint to the screen.
+      #         If charset is not ascii, (such as dec special graphics) uses the charset for codepoint
+      #         
+      # Returns nothing
+      def print(codepoint)
+        codepoint = @charset == :ascii ? codepoint : SEQ.with_charset(codepoint, @charset)
+        screen.print(codepoint)
       end
 
       # https://vt100.net/docs/vt220-rm/chapter4.html
       # 4.20 ANSI Mode Escape Sequences
+      # Internal: Handles escape esc sequences
       def on_escape(action)
         case action.intermediate_first&.chr
         when '#'
@@ -226,6 +308,7 @@ module Ooze
       # VT200 compat, with extra support from
       # https://vt100.net/docs/vt510-rm/contents.html
       # https://invisible-island.net/xterm/ctlseqs/ctlseqs.html
+      # Internal: Handles CSI esc sequences
       def on_csi_dispatch(action)
         case action.chr
         # Terminal modes: https://www.vt100.net/docs/vt220-rm/chapter4.html#T4-6
@@ -364,6 +447,11 @@ module Ooze
         end
       end
 
+      # Internal: Sets the ansi or dec mode
+      # 
+      # action - a Ooze::Terminal::Parser::Action
+      # 
+      # Returns nothing
       def set_mode(action)
         modemap = action.private_marker_chr == '?' ? dec_modemap : ansi_modemap
 
@@ -383,6 +471,11 @@ module Ooze
         end
       end
 
+      # Internal: Resets the ansi or dec mode
+      # 
+      # action - a Ooze::Terminal::Parser::Action
+      # 
+      # Returns nothing
       def reset_mode(action)
         modemap = action.private_marker_chr == '?' ? dec_modemap : ansi_modemap
 
@@ -401,6 +494,8 @@ module Ooze
         end
       end
 
+      # Internal: Resets all properties on session
+      #         Starts a new screen and migrates scrollback
       def reset_hard(action)
         @modes = modes_initial
         scrollback = @screen.scrollback.dup
@@ -414,6 +509,7 @@ module Ooze
       end
 
       # https://vt100.net/docs/vt510-rm/DECSTR.html
+      # Internal: Resets a specified modes, margins, active style, and cursors
       def soft_reset(action)
         @modes[:irm] = false
         @modes[:decom] = false
@@ -517,10 +613,6 @@ module Ooze
         clear_alt_screen
         @altscreen.cursor.row = cursor.row
         @altscreen.cursor.col = cursor.col
-      end
-      
-      def on_plugin(&block)
-        @on_plugin = block
       end
 
       def save_cursor

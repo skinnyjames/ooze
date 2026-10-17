@@ -38,6 +38,10 @@ class Ooze::UI::Session < Hokusai::Block
     selection_color_to: rgb(144, 94, 153);
     animate_selection: true;
   }
+  
+  panel {
+    background: rgb(11, 122, 54);
+  }
   EOF
   
   template <<-EOF
@@ -46,7 +50,7 @@ class Ooze::UI::Session < Hokusai::Block
       [if="plugin"]
         container { :block="plugin" }
       [else]
-        panel { @keypress="on_keypress" background="22,22,22"}
+        panel { @keypress="on_keypress" ...panel}
           screen { :width="width" :size="size"  }
   EOF
 
@@ -115,7 +119,6 @@ class Ooze::UI::Session < Hokusai::Block
         when :data
           plugin&.on_data(args[0]) if plugin&.respond_to?(:on_data)
         when :done
-          id = args[0]
           plugin&.on_data_complete if plugin&.respond_to?(:on_data_complete)
         when :closed
           self.plugin = nil
@@ -147,7 +150,7 @@ class Ooze::UI::Session < Hokusai::Block
 
   def on_keypress(event)
     return if session.modes[:kam]
-
+    
     if event.symbol == :v && (event.super || event.ctrl) && (content = Hokusai.paste)
       session.input.paste(content)
       return
@@ -165,6 +168,9 @@ class Ooze::UI::Session < Hokusai::Block
       key = HOKUSAI_TO_INPUT.fetch(event.symbol, event.symbol)
       session.input.keypress(key, modifiers)
     end
+
+    # consume keypress echo immediately
+    session.read_soon(0.003)
   end
 
   def render(canvas)
