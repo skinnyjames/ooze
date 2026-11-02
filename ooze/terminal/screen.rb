@@ -1,154 +1,8 @@
 require_relative "./style"
+require_relative "./screen/line"
 
 module Ooze
   module Terminal
-    # Public: A line (row) on the screen
-    # #
-    # Representation by logical char
-    # #
-    #                cols | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 
-    #           line text | f | 👧|:co| o |   | b | a | r |
-    #   attrs (style ids) | 0 | 0 | 0 | 0 | 0 | 1 | 1 | 1 |
-    #              widths | 1 | 2 | * | 1 | 1 | 1 | 1 | 1 |
-    # #
-    # Representation by rendered column (wide chars)
-    #   * represents continuation of wide char
-    # #
-    #                cols | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 
-    #           line text | f |   👧  | o |   | b | a | r |
-    #   attrs (style ids) | 0 | 0 | * | 0 | 0 | 1 | 1 | 1 |
-    class Line
-      attr_accessor :codepoints, :attrs, :widths, :wrapped, :width, :max
-
-      def initialize(max)
-        @max = max
-        @codepoints = Array.new(max)
-        @attrs = Array.new(max)
-        @widths = Array.new(max) { 1 }
-        @wrapped = false
-      end
-
-      # Public: Replaces a char at (col). 
-      #         Replace mode adds characters by replacing the character at the cursor position.
-      def replace(col, codepoint, attr, charw: codepoint.charwidth(1))
-        blank(col, attr)
-
-        # if a wide char, fill in more cols
-        (col + 1...col + charw).each do |i|
-          blank(i, attr)
-          
-          codepoints[i] = :continue
-          attrs[i] = attr
-          widths[i] = 0
-        end
-
-        # Put the codepoint in
-        codepoints[col] = codepoint
-        attrs[col] = attr
-        widths[col] = charw
-      end
-
-      def delete(col)
-        entry = col(col)
-
-        if entry && entry[:width] > 1
-          (entry[:index]...(entry[:index] + entry[:width])).each do |i|
-            blank(i, 0)
-          end
-        end
-
-        codepoints.delete_at(col)
-        attrs.delete_at(col)
-        widths.delete_at(col)
-      end
-
-      # Public: Insert mode displays the new character and moves previously displayed characters to the right. 
-      #
-      def insert(col, codepoint, attr, charw: codepoint.charwidth(1))
-        # handle an insert in the middle of a wide char
-        if entry = col(col)
-          blank(col, attr) if entry[:offset] > 0
-        end
-
-        codepoints.insert(col, codepoint)
-        attrs.insert(col, attr)
-        widths.insert(col, charw)
-
-        if charw > 1
-          (col + 1...col + charw).each do |i|
-            # blank(i, attr)
-            codepoints.insert(i, :continue)
-            attrs.insert(i, attr)
-            widths.insert(i, 0)
-          end
-        end
-
-        # truncate any chars at the end.
-        codepoints[max..] = []
-        attrs[max..] = []
-        widths[max..] = []
-
-        if entry = col(max - 1)
-          if entry[:width] > 1 && entry[:offset].zero?
-            codepoints[max - 1] = SEQR["sp"]
-            attrs[max - 1] = attr
-            widths[max - 1] = 1
-          end
-        end
-      end
-
-      def blank(col, attr, blank_nil: false)
-        if old = col(col)
-          ocol = old[:index]
-          owidth = old[:width]
-          (ocol...ocol + owidth).each do |i|
-            codepoints[i] = SEQR["sp"]
-            attrs[i] = attr
-            widths[i] = 1
-          end
-        elsif blank_nil
-          codepoints[col] = SEQR["sp"]
-          attrs[col] = attr
-          widths[col] = 1
-        end
-      end
-
-      # Public: resolves the logical values at col
-      #         with consideration to widechars
-      # 
-      # col - the display column
-      # 
-      def col(col)
-        offset = 0
-        i = col
-        cp = codepoints[i]
-        while cp == :continue
-          offset += 1
-          cp = codepoints[i -= 1]
-        end
-
-        return nil if cp.nil?
-          
-        {
-          index: i,
-          char: cp.chr("UTF-8"),
-          style_id: attrs[i],
-          width: widths[i],
-          offset: offset
-        }
-      end
-
-      def codepoints!
-        @codepoints.reject do |cp|
-          cp == :continue || cp.nil?
-        end
-      end
-
-      def to_s
-        codepoints!.pack("U*")
-      end
-    end
-
     Cursor = Struct.new(:row, :col)
 
     # Public: Represents a Terminal Screen
@@ -164,7 +18,8 @@ module Ooze
     # Styles with the same properties share a hash entry
     class Screen
       attr_accessor :current_style_id, :margin_top, :margin_bottom,
-                    :current_line_width, :cursor, :scrollback, :skip_evict
+                    :current_line_width, :cursor, :scrollback, :skip_evict, 
+                    :max_scrollback
 
       attr_reader :session, :rows, :cols, :cursor, :styles, :stylemap, :lines, :current_style,
                   :tabstops, :default_style_id
@@ -173,15 +28,20 @@ module Ooze
         @session = session
         @rows = rows
         @cols = cols
-        @skip_evict = false
 
         @cursor = Cursor.new(0, 0)
-        @scrollback = []
         @tabstops = {}
         @margin_top = 0
         @margin_bottom = rows - 1
 
+        # Scrollback vars
+        @scrollback = []
+        @skip_evict = false
         @on_evicted = nil
+        @max_scrollback = 10_000
+
+        # Misc state
+        @last_codepoint = nil
 
         # An array of unique style objects (index is the style id)
         @styles = []
@@ -198,61 +58,49 @@ module Ooze
         setup_tabstops
       end
 
-      def alignment
-        @lines = Array.new(rows) do
-          line = Line.new(cols)
-          line.codepoints = ['E'.ord] * cols
-          line.attrs = [default_style_id] * cols
-          line 
-        end
-      end
-
+      # Public: Sets a callback for each evicted line as runs
+      #
+      # block - callback that will be called with 
+      #         Array(Hash(chars: String, style: Ooze::Terminal::Style))
+      #         
+      # Returns nothing
       def on_evicted(&block)
         @on_evicted = block
       end
 
+      # Public: Yields a string of consecutive chars with the same style.
+      #         If the line is empty, yield :newline
+      # 
+      # block - callback that will be called with 
+      #         Array(String, Ooze::Terminal::Style) | Symbol
+      #
+      # Returns nothing
       def runs(&block)
-        run = []
-        default_id = @default_style_id
-        sid = lines[0]&.attrs[0] || default_id
-
         lines.each do |line|
-          last = line.codepoints.rindex { |i| !i.nil? }
-
-          if last.nil?
-            yield :newline
-            next
-          end
-          
-          (0..last).each do |idx|
-            attr = line.attrs[idx] || default_id
-            cp = line.codepoints[idx]
-        
-            if sid != attr
-              yield [run.pack("U*"), styles[sid]]
-
-              run.clear
-              sid = attr
-            end
-
-            if cp.nil?
-              run << SEQR["sp"]
-            elsif cp != :continue
-              run << cp
+          runs = line.runs(default_style_id)
+          runs.each do |run|
+            if run.empty?
+              yield :newline
+            else
+              yield [run[0], styles[run[1]]]
             end
           end
 
-          yield [run.pack("U*"), styles[sid]]
-          run.clear
           yield :newline
         end
       end
 
+      # Public: Reset all properties on the active style
+      # 
+      # Returns nothing
       def reset_style
         @current_style.reset
         @current_style_id = intern(@current_style)
       end
 
+      # Internal: Initializes tabstops at every 8th column
+      # 
+      # Returns nothing
       def setup_tabstops
         (0...cols).each do |i|
           if i % 8 == 0
@@ -261,19 +109,30 @@ module Ooze
         end
       end
 
+      # Public: Returns current line under cursor
+      # 
+      # Returns Ooze::Terminal::Line
       def current_line
-        lines[cursor.row]
+        @lines[@cursor.row]
       end
 
-      def rowcount
-        lines.size
-      end
-
+      # Public: Applys SGR parameters (ps) to current style.
+      #         If new style combination is not cached, cache it.
+      #
+      # ps - an array of CSI/SGR parameters (Array(Integer))  
+      #
+      # Returns nothing
       def sgr(ps)
         @current_style.sgr(ps)
         @current_style_id = intern(@current_style)
       end
 
+      # Public: Indexes an style with a unique combination of properties.
+      #         If the style properties are already cached, return that instead.
+      #         
+      # style - a Ooze::Terminal::Style
+      # 
+      # Returns a style id (Integer)
       def intern(style)
         id = stylemap[style]
         return id if id
@@ -283,149 +142,168 @@ module Ooze
         stylemap[snap] = styles.size - 1
       end
 
-      # Internal: Evicts a line of runs into scrollback 
+      # Internal: Evicts a line of runs into scrollback.
+      #           if Line#skip_evict is true, this will be skipped.
+      #           if Line#on_evicted callback is set, it will be called.
+      # 
+      # line - a Ooze::Terminal::Line
+      # 
+      # Returns nothing
       def evict(line)
         return if skip_evict
 
-        default_id = @default_style_id
-        current_id = line.attrs[0] || default_id
-        runs = []
-        chars = ""
-        last = line.attrs.rindex { |i| !i.nil? }
-
-        if last.nil?
-          scrollback << { chars: "\n", style: styles[default_id] }
-          return
+        runs = line.runs(default_style_id).map do |run|
+          { chars: run[0], style: styles[run[1]]}
         end
-  
-        (0..last).each do |idx|
-          style_id = line.attrs[idx] || default_id
-          codepoint = line.codepoints[idx]
 
-          next if codepoint == :continue
-          char = codepoint.nil? ? SEQR["sp"] : codepoint
-
-          if current_id != style_id
-            runs << { chars: chars, style: styles[current_id] }
-            chars = ""
-            chars << char
-            current_id = style_id
-          else
-            chars << char
+        if runs.empty?
+          to_evict = [{ chars: "\n", style: styles[default_style_id] }]
+        else
+          if runs[-1] && !runs[-1][:chars].empty?
+            runs[-1][:chars] = runs[-1][:chars] + "\n"
           end
+          to_evict = runs
         end
 
-        runs << { chars: chars, style: styles[current_id] }
-        if runs[-1] && !runs[-1][:chars].empty?
-          runs[-1][:chars] << "\n"
-        end
-
-        @on_evicted&.call(runs)
-        scrollback.concat runs
+        @on_evicted&.call(to_evict)
+        scrollback.concat to_evict
+        scrollback.shift(scrollback.size - @max_scrollback) if scrollback.size > @max_scrollback
       end
 
       def set_cursor(row, col)
         return set_cursor!(row, col) unless session.modes[:decom]
 
-        cursor.row = [[row + margin_top, margin_bottom].min, margin_top].max
-        cursor.col = [col, cols - 1].min 
-      end
-      
-      def set_cursor!(row, col)
-        cursor.row = [row, rows - 1].min
-        cursor.col = [col, cols - 1].min 
+        @cursor.row = [[row + margin_top, margin_bottom].min, margin_top].max
+        @cursor.col = [col, cols - 1].min 
       end
 
       # Public: index moves the cursor down one line in the same column.
       #         If the cursor is at the bottom margin, the screen performs a scroll-up.
       #         https://vt100.net/docs/vt220-rm/chapter4.html
+      # 
+      # Returns nothing
       def index
-        if cursor.row == margin_bottom
+        if @cursor.row == margin_bottom
           scroll_up
         else
-          cursor.row += 1 unless cursor.row >= rows - 1
+          @cursor.row += 1 unless @cursor.row >= rows - 1
         end
       end
 
+      # Public: Scroll the screen up (times) times.
+      #         Lines at the top will be evicted.
+      # 
+      # times - number of times to scroll up (Integer)
+      # 
+      # Returns nothing
       def scroll_up(times = 1)
         times.times do
-          line = lines.delete_at(margin_top)
+          line = @lines.delete_at(margin_top)
           evict(line) if margin_top.zero?
-          lines.insert(margin_bottom, Line.new(cols))
+          line.clear
+          @lines.insert(margin_bottom, line)
         end
       end
 
+      # Public: index moves the cursor up one line in the same column.
+      #         If the cursor is at the top margin, the screen performs a scroll-down.
+      #         https://vt100.net/docs/vt220-rm/chapter4.html
+      #
+      # Returns nothing
       def reverse_index
-        if cursor.row == margin_top
+        if @cursor.row == margin_top
           scroll_down
         else
-          cursor.row -= 1 unless cursor.row - 1 < 0
+          @cursor.row -= 1 unless @cursor.row - 1 < 0
         end
       end
 
+      # Public: Scroll down (times) times
+      #         Lines at the bottom will be deleted.
+      # 
+      # times - the number of times to scroll down
+      # 
+      # Returns nothing
       def scroll_down(times = 1)
         times.times do
-          lines.delete_at(margin_bottom)
-          lines.insert(margin_top, Line.new(cols))
+          @lines.delete_at(margin_bottom)
+          @lines.insert(margin_top, Line.new(cols))
         end
       end
 
+      # Public: Indexes the screen and sets the cursor 
+      #         to the beginning of the line
+      # 
+      # Returns nothing
       def next_line
         index
 
-        cursor.col = 0
+        @cursor.col = 0
       end
 
-      # TODO: save / restore cursor
-      # tabs
+      # Public: Moves cursor to the next (times) tabstop
+      #         If no more tabstops are present, moves the cursor
+      #         to the edge of the screen. 
+      #
+      # times - times to move the cursor
+      # 
+      # Returns nothing
       def tabgoto(times = 1)
         stops = @tabstops.keys.sort
 
         times.times do
           stopped = stops.find do |stop|
-            stop > cursor.col
+            stop > @cursor.col
           end
 
-          cursor.col = stopped || cols - 1
+          @cursor.col = stopped || cols - 1
         end
       end
 
+      # Public: Moves cursor to the previous (times) tabstop
+      #         If no more tabstops are present, moves the cursor
+      #         to the beginning of the screen. 
+      #
+      # times - times to move the cursor
+      # 
+      # Returns nothing
       def tabback(times = 1)
         stops = @tabstops.keys.sort
 
         times.times do
           stopped = stops.reverse.find do |stop|
-            stop < cursor.col
+            stop < @cursor.col
           end
 
-          cursor.col = stopped || 0
+          @cursor.col = stopped || 0
         end
       end
 
+      # Public: Sets a tabstop at cursor position
+      # 
+      # Returns nothing
       def tabset
-        @tabstops[cursor.col] = true
+        @tabstops[@cursor.col] = true
       end
 
+      # Public: Clears tabstop at cursor position
+      #         if (all) is true, clear all tabstops
+      #         
+      # all - clear all tabstops (Boolean)
+      # 
+      # Returns nothing
       def tabclear(all = false)
         if all
           @tabstops.clear
           return
         end
 
-        @tabstops.delete(cursor.col)
+        @tabstops.delete(@cursor.col)
       end
 
       # https://vt100.net/docs/vt220-rm/chapter4.html
       # 4.10 Line Attributes
       # No-Op for now, how dumb.
-
-      def repeat_last_char(count)
-        return unless @last_codepoint
-
-        count.times do 
-          print(@last_codepoint)
-        end
-      end
 
       # Public: Inserts (count) lines at the cursor. 
       #        If fewer than (count) lines remain from the current line to the end of the scrolling region, 
@@ -438,22 +316,22 @@ module Ooze
       #
       # Returns nothing
       def line_insert(count)
-        return if cursor.row > margin_bottom || cursor.row < margin_top
+        return if @cursor.row > margin_bottom || @cursor.row < margin_top
 
-        count = (margin_bottom + 1) - cursor.row > count ? count : (margin_bottom + 1) - cursor.row
+        count = (margin_bottom + 1) - @cursor.row > count ? count : (margin_bottom + 1) - @cursor.row
 
         # insert the lines
         count.times do
-          lines.insert(cursor.row, Line.new(cols))
+          @lines.insert(@cursor.row, Line.new(cols))
         end
 
         # truncate extra rows
         count.times do
-          lines.delete_at(margin_bottom + 1)
+          @lines.delete_at(margin_bottom + 1)
         end
 
         # reset the cursor
-        cursor.col = 0
+        @cursor.col = 0
       end
 
       # Public: Deletes Pn lines starting at the line with the cursor.
@@ -467,38 +345,61 @@ module Ooze
       #
       # Returns nothing
       def line_delete(count)
-        return if cursor.row > margin_bottom || cursor.row < margin_top
+        return if @cursor.row > margin_bottom || @cursor.row < margin_top
 
-        count = (margin_bottom + 1) - cursor.row > count ? count : (margin_bottom + 1) - cursor.row
+        count = (margin_bottom + 1) - @cursor.row > count ? count : (margin_bottom + 1) - @cursor.row
 
-        lines[cursor.row, count] = []
+        @lines[@cursor.row, count] = []
 
         count.times do
-          lines.insert(margin_bottom + 1 - count, Line.new(cols))
+          @lines.insert(margin_bottom + 1 - count, Line.new(cols))
         end
 
-        cursor.col = 0
+        @cursor.col = 0
       end
 
+      # TODO: Rename method
+      # Public: Inserts a space (count) times at cursor position
+      # 
+      # count - tiems to insert the space
+      # 
+      # Returns nothing
       def insert_chars(count)
-        return if cursor.row > margin_bottom || cursor.row < margin_top
+        return if @cursor.row > margin_bottom || @cursor.row < margin_top
 
         count = 1 if count.zero?
 
         count.times do
-          current_line.insert(cursor.col, SEQR["sp"], @default_style_id)
+          current_line.insert(@cursor.col, SEQR["sp"], @default_style_id)
         end
       end
 
+      # Public: Delete chars under cursor (count) times
+      #         Shifts the remaining chars left and appends line with spaces
+      #         
+      # count - times to delete at cursor
       def delete_chars(count)
-        count = [count, cols - cursor.col].min
+        count = [count, cols - @cursor.col].min
 
         count.times do
-          current_line.delete(cursor.col)
+          current_line.delete(@cursor.col)
 
           current_line.codepoints << SEQR["sp"]
           current_line.widths << 1
           current_line.attrs << @default_style_id
+        end
+      end
+
+      # Public: Prints last recieved codepoint (count) times
+      # 
+      # count - times to print the codepoint
+      # 
+      # Returns nothing
+      def repeat_last_char(count)
+        return unless @last_codepoint
+
+        count.times do 
+          print(@last_codepoint)
         end
       end
 
@@ -507,11 +408,15 @@ module Ooze
       #         A parameter of 0 or 1 erases a single character. 
       #         Character attributes are set to normal. No reformatting of data on the line occurs. 
       #         The cursor remains in the same position.
+      # 
+      # count - times to erase the char
+      # 
+      # Returns nothing
       def erase_char(count)
         count = count.zero? ? 1 : count
 
         count.times do |a|
-          i = [cursor.col + a, cols - 1].min
+          i = [@cursor.col + a, cols - 1].min
 
           current_line.blank(i, @default_style_id, blank_nil: true)
         end
@@ -523,11 +428,16 @@ module Ooze
       #         Mode = 1 Erases from the beginning of the line to the cursor, 
       #                 including the cursor position. Line attribute is not affected.
       #         Mode = 2 Erases the complete line.
+      # 
+      # mode - the erase mode (Integer)
+      # kwargs -
+      #   selective: skip erase if true
+      #
       # Returns nothing
       def erase_in_line(mode, line: current_line, selective: false)
         return if selective # Not handling (Selective Erase In Line (DECSEL))
 
-        col = [cursor.col, cols - 1].min
+        col = [@cursor.col, cols - 1].min
         ranges = { 0 => (col...cols), 1 => (0..col), 2 => (0...cols) }
       
         # ignore bad modes
@@ -550,15 +460,21 @@ module Ooze
       #                  including the cursor position. Line attribute 
       #                  becomes single-height, single-width for all completely erased lines.
       #         Mode = 2 Erases the complete display. All lines are erased and changed to single-width. The cursor does not move.
+      #         
+      # mode - the erase mode (Integer)
+      # kwargs -
+      #   selective: skips erase if true
+      #   
+      # Returns nothing
       def erase_in_display(mode, selective: false)
         return if selective # Not Handling (Selective Erase In Display (DECSED))
 
-        ranges = { 0 => (cursor.row + 1...rows), 1 => (0...cursor.row), 2 => (0...rows) }
+        ranges = { 0 => (@cursor.row + 1...rows), 1 => (0...@cursor.row), 2 => (0...rows) }
 
         # erase the line
         if range = ranges[mode]
           range.each do |row|
-            line = lines[row]
+            line = @lines[row]
             erase_in_line(2, line: line)
           end
         end
@@ -566,12 +482,14 @@ module Ooze
         erase_in_line(mode)
       end
 
-      def reset_margins
-        self.margin_top = 0
-        self.margin_bottom = rows - 1
-      end
-
       # 4.13 Scrolling margins
+      # Public: Set margins/scroll region.  When margins are set, 
+      #         indexing/scroll/line insert is restricted to the screen subset
+      # 
+      # top - the top margin (clamped to screen top)
+      # bottom - the bottom margin (clamped to screen bottom)
+      # 
+      # Returns nothing
       def set_margins(top, bottom)
         t = top
         b = bottom
@@ -586,47 +504,53 @@ module Ooze
 
         self.margin_top = t
         self.margin_bottom = b
-        cursor.row = 0
-        cursor.col = 0
+        @cursor.row = 0
+        @cursor.col = 0
+      end
+
+      # Public: Resets margins to screen borders
+      # 
+      # Returns nothing
+      def reset_margins
+        self.margin_top = 0
+        self.margin_bottom = rows - 1
       end
 
       # Public: Moves the cursor up (count) lines in the same column. 
       #         The cursor stops at the top margin.
       #
       # count - the rows to move up
+      # 
+      # Returns nothing
       def cursor_up(count)
-        top = cursor.row >= margin_top ? margin_top : 0
-        new_row = cursor.row - count 
-        cursor.row = [top, new_row].max
+        top = @cursor.row >= margin_top ? margin_top : 0
+        new_row = @cursor.row - count
+        @cursor.row = [top, new_row].max
       end
 
       # Public: Moves the cursor down (count) lines in the same column. 
       #         The cursor stops at the bottom margin.
       #
       # count - the rows to move down
+      # 
+      # Returns nothing
       def cursor_down(count)
-        bottom = cursor.row <= margin_bottom ? margin_bottom : rows - 1
-        new_row = cursor.row + count 
-        cursor.row = [new_row, bottom].min
+        bottom = @cursor.row <= margin_bottom ? margin_bottom : rows - 1
+        new_row = @cursor.row + count 
+        @cursor.row = [new_row, bottom].min
       end
+
       # Public: Moves the cursor right (count) columns. 
       #         The cursor stops at the right margin.
       #
       # count - the columns to move forward
+      # 
+      # Returns nothing
       def cursor_forward(count)
-        new_col = cursor.col + count
+        new_col = @cursor.col + count
         offset = session.modes[:decawm] ? 0 : 1
         col_with_offset = new_col > cols - offset ? cols - offset : new_col
-        cursor.col = [cols - 1, col_with_offset].min
-      end
-
-      # Public: Like cursor_forward but can move into the 
-      #         right margin (pending wrap) position
-      def advance(count)
-        new_col = cursor.col + count
-        offset = session.modes[:decawm] ? 0 : 1
-        col_with_offset = new_col > cols - offset ? cols - offset : new_col
-        cursor.col = col_with_offset
+        @cursor.col = [cols - 1, col_with_offset].min
       end
 
       # Public: Moves the cursor left (count) columns. 
@@ -635,54 +559,121 @@ module Ooze
       #         backward traverse soft wrapped lines
       #
       # count - the columns to move backward
+      # 
+      # Returns nothing
       def cursor_backward(count)
         reverse_wrap = session.modes[:decawm] && session.modes[:xtrevwrap]
 
-        count -= 1 if cursor.col >= cols && reverse_wrap
-        cursor.col = [cursor.col, cols - 1].min   # leave pending-wrap position
+        count -= 1 if @cursor.col >= cols && reverse_wrap
+        @cursor.col = [@cursor.col, cols - 1].min   # leave pending-wrap position
 
         count.times do
           # move up and back if wrapped and reverse wrap is on
-          if cursor.col.zero? && reverse_wrap
-            prev_row = cursor.row - 1
-            if prev_row >= margin_top && lines[prev_row]&.wrapped 
-              cursor.row = prev_row
-              cursor.col = cols - 1
+          if @cursor.col.zero? && reverse_wrap
+            prev_row = @cursor.row - 1
+            if prev_row >= margin_top && @lines[prev_row]&.wrapped 
+              @cursor.row = prev_row
+              @cursor.col = cols - 1
             else
               break
             end
-          elsif cursor.col > 0
-            cursor.col -= 1
+          elsif @cursor.col > 0
+            @cursor.col -= 1
           else
             break
           end
         end
       end
 
+      # Public: Sets the cursor to (row, col).
+      #         Clamps to screen borders.
+      # 
+      # row - the row to set (Integer)
+      # col - the col to set (Integer)
+      # 
+      # Returns nothing
+      def set_cursor!(row, col)
+        @cursor.row = clamp(row, 0, rows - 1)
+        @cursor.col = clamp(col, 0, cols - 1) 
+      end
+
       # TODO: UTF-8 Needs to handle grapheme breaks.
       #       The parser can emit ZWJ or other (control) chars.
       #       ref: deps/mruby-utf8proc/src/utf8proc.h#644
+      # 
+      # Public: Prints a codepoint to the screen.
+      #         If autowrap is on and in pending wrap position,
+      #         prints on the next line. Advances the cursor.
+      # 
+      # codepoint - the codepoint to print
+      # 
+      # Returns nothing.
       def print(codepoint)
+        decawm = session.modes[:decawm]
         @last_codepoint = codepoint
-        width = session.width(codepoint)
+        width = codepoint < ASCII_CODE_TABLE[:del] ? 1 : session.width(codepoint)
 
         # wrap pending and autowrap is on, move the cursor down
-        if session.modes[:decawm] && cursor.col + width > cols
-          lines[cursor.row].wrapped = true
-          cursor.col = 0
+        if decawm && @cursor.col + width > cols
+          @lines[@cursor.row].wrapped = true
+          @cursor.col = 0
           index
         end
   
-        line = lines[cursor.row]
+        line = @lines[@cursor.row]
 
         if session.modes[:irm]
-          line.insert(cursor.col, codepoint, current_style_id, charw: width)
+          line.insert(@cursor.col, codepoint, current_style_id, width)
         else
-          col = [cursor.col, cols - width].min
-          line.replace(col, codepoint, current_style_id, charw: width)
+          col = clamp(@cursor.col, 0, cols - width)
+          line.replace(col, codepoint, current_style_id, width)
         end
 
-        advance(width)
+        # advance cursor
+        new_col = @cursor.col + width
+        offset = decawm ? 0 : 1
+        col_with_offset = new_col > cols - offset ? cols - offset : new_col
+        @cursor.col = col_with_offset
+      end
+
+      # Public: Like cursor_forward but can move into the 
+      #         right margin (pending wrap) position
+      #
+      # count - times to move the cursor forward (Integer)
+      # autowrap - wheither to move to the pending wrap position (Boolean)
+      # 
+      # Returns nothin
+      def advance(count, autowrap = false)
+        new_col = @cursor.col + count
+        offset = autowrap ? 0 : 1
+        col_with_offset = new_col > cols - offset ? cols - offset : new_col
+        @cursor.col = col_with_offset
+      end
+
+      # Public: Sets the whole screen to 'E'.
+      #         (used for diagnostics.)
+      #
+      # Returns nothing
+      def alignment
+        @lines = Array.new(rows) do
+          line = Line.new(cols)
+          line.codepoints = ['E'.ord] * cols
+          line.attrs = [default_style_id] * cols
+          line 
+        end
+      end
+
+      private
+
+      # Public: Clamps value to min/max
+      # 
+      # value - the value to clamp
+      # min - the minium possible clamp value
+      # max - the maximum possible clamp value
+      def clamp(value, min, max)
+        return min if value < min
+        return max if value > max
+        value
       end
     end
   end

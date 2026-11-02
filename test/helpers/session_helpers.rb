@@ -34,7 +34,7 @@ module SessionHelpers
             next
           end
   
-          cp = entry[:char]
+          cp = line.char_at(col)
           wc = entry[:width]
           st = entry[:style_id]
 

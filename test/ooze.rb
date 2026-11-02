@@ -22,6 +22,20 @@ module Matchers
       @error
     end
   end
+
+  class LessThan < ::Matchers::MatchBase
+    def match(actual)
+      @expected >= actual
+    end
+
+    def error(actual)
+      "#{actual.inspect} is not less than #{@expected.inspect}"
+    end
+  end
+
+  def be_less_than(expected)
+    LessThan.new(expected)
+  end
 end
 
 require_relative "./helpers/session_helpers"

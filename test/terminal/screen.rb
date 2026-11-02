@@ -139,10 +139,34 @@ class TerminalScreenTest < Oozey::Test
       5 => { index: 5, char: " ", width: 1, style_id: 2, offset: 0 },
       16 => nil,
     }.each do |col, expected|
-      expect(@session.screen.current_line.col(col)).to eql(expected)
-    end
+      actual = @session.screen.current_line.col(col)
+      actual&.merge!({ char: @session.screen.current_line.char_at(col) })
 
-    # debug the grid
-    # puts render(@session)
+      expect(actual).to eql(expected)
+    end
+  end
+
+  test "Screen#alignment populates screen" do
+    @session.screen.alignment
+
+    expect(render(@session).strip).to eql <<-EOF.strip
+| 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 |10 |11 |12 |13 |14 |15 |16 |17 |18 |19 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| E | E | E | E | E | E | E | E | E | E | E | E | E | E | E | E | E | E | E | E |
+| 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| E | E | E | E | E | E | E | E | E | E | E | E | E | E | E | E | E | E | E | E |
+| 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| E | E | E | E | E | E | E | E | E | E | E | E | E | E | E | E | E | E | E | E |
+| 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| E | E | E | E | E | E | E | E | E | E | E | E | E | E | E | E | E | E | E | E |
+| 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| E | E | E | E | E | E | E | E | E | E | E | E | E | E | E | E | E | E | E | E |
+| 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+    EOF
   end
 end
